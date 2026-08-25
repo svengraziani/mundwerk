@@ -1,0 +1,380 @@
+[
+  {
+    "file": "whistle-clean.wav",
+    "label": "Pfeifen — sauber",
+    "mode": "melody",
+    "seconds": 2.85,
+    "expect": {
+      "notes": [
+        {
+          "midi": 81,
+          "start": 0.15,
+          "end": 0.57
+        },
+        {
+          "midi": 83,
+          "start": 0.66,
+          "end": 1.08
+        },
+        {
+          "midi": 85,
+          "start": 1.17,
+          "end": 1.59
+        },
+        {
+          "midi": 86,
+          "start": 1.68,
+          "end": 2.1
+        },
+        {
+          "midi": 88,
+          "start": 2.19,
+          "end": 2.61
+        }
+      ]
+    }
+  },
+  {
+    "file": "whistle-vibrato.wav",
+    "label": "Pfeifen — starkes Vibrato",
+    "mode": "melody",
+    "seconds": 2.67,
+    "expect": {
+      "notes": [
+        {
+          "midi": 79,
+          "start": 0.15,
+          "end": 0.85
+        },
+        {
+          "midi": 81,
+          "start": 0.94,
+          "end": 1.64
+        },
+        {
+          "midi": 84,
+          "start": 1.73,
+          "end": 2.43
+        }
+      ]
+    }
+  },
+  {
+    "file": "whistle-reverb.wav",
+    "label": "Pfeifen — verhallt",
+    "mode": "melody",
+    "seconds": 2.22,
+    "expect": {
+      "notes": [
+        {
+          "midi": 81,
+          "start": 0.15,
+          "end": 0.65
+        },
+        {
+          "midi": 84,
+          "start": 0.79,
+          "end": 1.29
+        },
+        {
+          "midi": 86,
+          "start": 1.43,
+          "end": 1.93
+        }
+      ]
+    }
+  },
+  {
+    "file": "whistle-noisy.wav",
+    "label": "Pfeifen — mit Raumrauschen",
+    "mode": "melody",
+    "seconds": 2.07,
+    "expect": {
+      "notes": [
+        {
+          "midi": 83,
+          "start": 0.15,
+          "end": 0.65
+        },
+        {
+          "midi": 85,
+          "start": 0.74,
+          "end": 1.24
+        },
+        {
+          "midi": 88,
+          "start": 1.33,
+          "end": 1.83
+        }
+      ]
+    }
+  },
+  {
+    "file": "whistle-octave-bait.wav",
+    "label": "Pfeifen — starker 2. Teilton",
+    "mode": "melody",
+    "seconds": 2.07,
+    "expect": {
+      "notes": [
+        {
+          "midi": 81,
+          "start": 0.15,
+          "end": 0.65
+        },
+        {
+          "midi": 85,
+          "start": 0.74,
+          "end": 1.24
+        },
+        {
+          "midi": 88,
+          "start": 1.33,
+          "end": 1.83
+        }
+      ]
+    }
+  },
+  {
+    "file": "whistle-glide.wav",
+    "label": "Pfeifen — ein Glissando",
+    "mode": "melody",
+    "seconds": 1.9,
+    "expect": {
+      "notes": 1,
+      "from": 79,
+      "to": 88
+    }
+  },
+  {
+    "file": "error-quiet.wav",
+    "label": "Fehlerfall — zu leise",
+    "mode": "melody",
+    "seconds": 2,
+    "expect": {
+      "fails": true
+    }
+  },
+  {
+    "file": "error-noise.wav",
+    "label": "Fehlerfall — nur Rauschen",
+    "mode": "melody",
+    "seconds": 2,
+    "expect": {
+      "fails": true
+    }
+  },
+  {
+    "file": "beat-simple.wav",
+    "label": "Beat — gerade, 100 BPM",
+    "mode": "beat",
+    "seconds": 5.55,
+    "expect": {
+      "bpm": 100,
+      "hits": [
+        {
+          "t": 0.15,
+          "type": "kick"
+        },
+        {
+          "t": 0.45,
+          "type": "hat"
+        },
+        {
+          "t": 0.75,
+          "type": "snare"
+        },
+        {
+          "t": 1.05,
+          "type": "hat"
+        },
+        {
+          "t": 1.35,
+          "type": "kick"
+        },
+        {
+          "t": 1.65,
+          "type": "hat"
+        },
+        {
+          "t": 1.95,
+          "type": "snare"
+        },
+        {
+          "t": 2.25,
+          "type": "hat"
+        },
+        {
+          "t": 2.55,
+          "type": "kick"
+        },
+        {
+          "t": 2.85,
+          "type": "hat"
+        },
+        {
+          "t": 3.15,
+          "type": "snare"
+        },
+        {
+          "t": 3.45,
+          "type": "hat"
+        },
+        {
+          "t": 3.75,
+          "type": "kick"
+        },
+        {
+          "t": 4.05,
+          "type": "hat"
+        },
+        {
+          "t": 4.35,
+          "type": "snare"
+        },
+        {
+          "t": 4.65,
+          "type": "hat"
+        }
+      ]
+    }
+  },
+  {
+    "file": "beat-fast.wav",
+    "label": "Beat — Sechzehntel, 140 BPM",
+    "mode": "beat",
+    "seconds": 4.18,
+    "expect": {
+      "bpm": 140,
+      "hits": [
+        {
+          "t": 0.15,
+          "type": "kick"
+        },
+        {
+          "t": 0.2571,
+          "type": "hat"
+        },
+        {
+          "t": 0.3643,
+          "type": "hat"
+        },
+        {
+          "t": 0.4714,
+          "type": "hat"
+        },
+        {
+          "t": 0.5786,
+          "type": "snare"
+        },
+        {
+          "t": 0.6857,
+          "type": "hat"
+        },
+        {
+          "t": 0.7929,
+          "type": "kick"
+        },
+        {
+          "t": 0.9,
+          "type": "hat"
+        },
+        {
+          "t": 1.0071,
+          "type": "hat"
+        },
+        {
+          "t": 1.1143,
+          "type": "hat"
+        },
+        {
+          "t": 1.2214,
+          "type": "hat"
+        },
+        {
+          "t": 1.3286,
+          "type": "hat"
+        },
+        {
+          "t": 1.4357,
+          "type": "snare"
+        },
+        {
+          "t": 1.5429,
+          "type": "hat"
+        },
+        {
+          "t": 1.65,
+          "type": "hat"
+        },
+        {
+          "t": 1.7571,
+          "type": "hat"
+        },
+        {
+          "t": 1.8643,
+          "type": "kick"
+        },
+        {
+          "t": 1.9714,
+          "type": "hat"
+        },
+        {
+          "t": 2.0786,
+          "type": "hat"
+        },
+        {
+          "t": 2.1857,
+          "type": "hat"
+        },
+        {
+          "t": 2.2929,
+          "type": "snare"
+        },
+        {
+          "t": 2.4,
+          "type": "hat"
+        },
+        {
+          "t": 2.5071,
+          "type": "kick"
+        },
+        {
+          "t": 2.6143,
+          "type": "hat"
+        },
+        {
+          "t": 2.7214,
+          "type": "hat"
+        },
+        {
+          "t": 2.8286,
+          "type": "hat"
+        },
+        {
+          "t": 2.9357,
+          "type": "hat"
+        },
+        {
+          "t": 3.0429,
+          "type": "hat"
+        },
+        {
+          "t": 3.15,
+          "type": "snare"
+        },
+        {
+          "t": 3.2571,
+          "type": "hat"
+        },
+        {
+          "t": 3.3643,
+          "type": "hat"
+        },
+        {
+          "t": 3.4714,
+          "type": "hat"
+        }
+      ]
+    }
+  }
+]

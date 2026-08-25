@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mundwerk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Prototyp · alles aus dem Mund</div>
+  <h1>Pfeif es.<br>Beatbox es. <em>Nimm's mit.</em></h1>
+  <p class="lede">Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Beides geht als MIDI raus — mit Pitch Bend, Anschlagstärke und Druck, damit die Schleifer und die Dynamik in deiner DAW nicht verloren gehen.</p>
+</header>
+
+<div class="modes" role="tablist">
+  <button class="mode on" data-m="melody" role="tab" aria-selected="true">Melodie<span class="tag">PFEIFEN</span></button>
+  <button class="mode" data-m="beat" role="tab" aria-selected="false">Beat<span class="tag">MUND</span></button>
+</div>
+
+<div class="trace">
+  <canvas id="cv"></canvas>
+  <div class="tempty" id="empty">Noch keine Spur</div>
+  <div class="readout" id="readout">—</div>
+</div>
+
+<div class="rec-row">
+  <button class="rec" id="rec" aria-label="Aufnahme starten"><span class="rec-icon"></span></button>
+  <div class="rec-label">
+    <b id="recTitle">Aufnehmen</b>
+    <span id="recHint">Pfeif eine kurze Melodie, bis 20 Sekunden.</span>
+  </div>
+</div>
+
+<div class="source-row">
+  <button class="btn small" id="loadBtn">Datei laden</button>
+  <select class="btn small" id="fixture" aria-label="Testaufnahme">
+    <option value="">Testaufnahme …</option>
+  </select>
+  <input type="file" id="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" class="hidden">
+</div>
+
+<div class="status" id="status"></div>
+
+<!-- ============ MELODIE ============ -->
+<div id="panelM" class="hidden">
+  <section>
+    <div class="sec"><h2>Instrument</h2><span id="instCount"></span></div>
+    <div class="grid" id="instGrid"></div>
+  </section>
+  <section>
+    <div class="sec"><h2>Formen</h2><span>wirkt sofort</span></div>
+    <div class="ctrl">
+      <div class="ctop"><label for="oct">Lage</label><span class="cval" id="octV">−12 Halbtöne</span></div>
+      <input type="range" id="oct" min="-24" max="12" step="1" value="-12">
+      <div class="chint">Pfeifen liegt hoch. Runterziehen bringt die Melodie dahin, wo das Instrument natürlich klingt.</div>
+    </div>
+    <div class="ctrl">
+      <div class="ctop"><label for="vib">Vibrato</label><span class="cval" id="vibV">100 %</span></div>
+      <input type="range" id="vib" min="0" max="250" step="5" value="100">
+      <div class="chint">Nur die schnellen Schwankungen — die Melodie darunter bleibt unberührt.</div>
+    </div>
+    <div class="ctrl">
+      <div class="ctop"><label for="quant">Auf Halbtöne ziehen</label><span class="cval" id="quantV">0 %</span></div>
+      <input type="range" id="quant" min="0" max="100" step="5" value="0">
+      <div class="chint">Bei 0 % bleiben Glissandi vollständig erhalten. Höher wird sauberer, aber steifer.</div>
+    </div>
+    <div class="ctrl">
+      <div class="ctop"><label for="breath">Luft</label><span class="cval" id="breathV">100 %</span></div>
+      <input type="range" id="breath" min="0" max="200" step="10" value="100">
+      <div class="chint">Rauschanteil im Ton. Bei Flöten der Unterschied zwischen Sinus und Atem.</div>
+    </div>
+  </section>
+</div>
+
+<!-- ============ BEAT ============ -->
+<div id="panelB" class="hidden">
+  <section>
+    <div class="sec"><h2>Kit</h2><span id="kitCount"></span></div>
+    <div class="grid" id="kitGrid"></div>
+  </section>
+  <section>
+    <div class="sec"><h2>Formen</h2><span id="bpmOut">—</span></div>
+    <div class="ctrl">
+      <div class="ctop"><label for="dsens">Empfindlichkeit</label><span class="cval" id="dsensV">50 %</span></div>
+      <input type="range" id="dsens" min="10" max="90" step="5" value="50">
+      <div class="chint">Höher findet leise Hi-Hats, fängt aber auch Atmen ein. Niedriger nimmt nur die klaren Schläge.</div>
+    </div>
+    <div class="ctrl">
+      <div class="ctop"><label for="dgrid">Aufs Raster ziehen</label><span class="cval" id="dgridV">0 %</span></div>
+      <input type="range" id="dgrid" min="0" max="100" step="10" value="0">
+      <div class="chint">Zieht die Schläge Richtung Sechzehntelraster des geschätzten Tempos. Bei 0 % bleibt dein Timing wie gepfiffen.</div>
+    </div>
+    <div class="ctrl">
+      <div class="ctop"><label for="dtune">Kick-Stimmung</label><span class="cval" id="dtuneV">±0</span></div>
+      <input type="range" id="dtune" min="-12" max="12" step="1" value="0">
+      <div class="chint">Tiefer wird bauchiger, höher wird knackiger.</div>
+    </div>
+  </section>
+</div>
+
+<!-- ============ AUSGABE ============ -->
+<section id="out" class="hidden">
+  <div class="sec"><h2>Anhören</h2><span id="dur"></span></div>
+  <div class="row">
+    <button class="btn primary" id="playMain">Abspielen</button>
+    <button class="btn" id="playOrig">Original</button>
+    <button class="btn violet hidden" id="playBoth">Melodie + Beat</button>
+    <button class="btn" id="dlWav">WAV</button>
+  </div>
+
+  <div class="sec" style="margin-top:38px"><h2>MIDI</h2><span>Format 1 · 480 PPQ</span></div>
+  <div class="midi-card">
+    <div class="midi-list">
+      <div class="midi-item"><span class="midi-key">BEND</span><div><b>Pitch Bend, ±12 Halbtöne</b> <span>— alle 16 ms ein Wert. Deine Schleifer und das Vibrato überleben den Export.</span></div></div>
+      <div class="midi-item"><span class="midi-key">VEL</span><div><b>Velocity pro Note</b> <span>— aus der Lautstärke im Moment des Einsatzes.</span></div></div>
+      <div class="midi-item"><span class="midi-key">AT</span><div><b>Channel Pressure</b> <span>— der Lautstärkeverlauf während der Note, alle 40 ms. Zusätzlich als CC11 für DAWs, die Aftertouch ignorieren.</span></div></div>
+      <div class="midi-item"><span class="midi-key">CH10</span><div><b>Drums auf Kanal 10</b> <span>— General-MIDI-Belegung, Velocity aus der Anschlagstärke.</span></div></div>
+    </div>
+    <div class="ctrl" style="margin-bottom:16px">
+      <div class="ctop"><label for="bendRange">Bend-Umfang</label><span class="cval" id="bendRangeV">±12 Halbtöne</span></div>
+      <input type="range" id="bendRange" min="2" max="24" step="1" value="12">
+      <div class="chint">Wird als RPN mitgeschickt. Muss im Ziel-Instrument gleich eingestellt sein, sonst klingen die Bends falsch.</div>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="dlMidi">MIDI sichern</button>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <b style="color:var(--muted);font-weight:500">Mundwerk</b> — alles läuft lokal, deine Aufnahme verlässt das Gerät nicht.<br>
+  Instrumente und Drums sind synthetisiert, keine Samples. In der nativen App stünden hier echte Multisamples.
+</footer>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
