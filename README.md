@@ -1,8 +1,9 @@
 # Mundwerk
 
 Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Beides geht als MIDI
-raus — mit Pitch Bend, Velocity und Channel Pressure, damit Schleifer und
-Dynamik in der DAW nicht verloren gehen. Läuft komplett lokal im Browser.
+raus — klassisch oder als MPE, mit Pitch Bend, Velocity und Druck, damit
+Schleifer und Dynamik in der DAW nicht verloren gehen. Wer die Kurve selbst
+braucht, holt sie als CSV oder JSON. Läuft komplett lokal im Browser.
 
 ```
 npm install
@@ -22,6 +23,36 @@ npm test           # node --test gegen die Fixtures, kein Mikrofon nötig
 npm run fixtures   # Fixtures neu erzeugen (deterministisch)
 npm run build
 ```
+
+## Was rauskommt
+
+**MIDI, klassisch.** Format 1, 480 PPQ. Melodie auf Kanal 1, Drums auf Kanal 10.
+Pitch Bend alle 16 ms, Channel Pressure und CC11 alle 40 ms. Der Bend-Umfang
+steht als RPN 0 in der Datei und muss im Ziel-Instrument gleich eingestellt
+sein.
+
+**MIDI als MPE.** Untere Zone, Kanal 1 als Master, die Anzahl der Stimmkanäle
+als MPE Configuration Message. Jede Note wandert reihum auf einen eigenen
+Member-Kanal — Bend und Druck gelten damit genau dieser Stimme. Dazu CC74 als
+Y-Achse: wie hoch im Umfang der Aufnahme gerade gepfiffen wird. Der Bend-Umfang
+steht auf jedem Member-Kanal, nicht nur auf einem; damit stellt sich das
+Ziel-Instrument selbst richtig ein. Liegt ein Beat dabei, wird die Zone
+kleiner, damit Kanal 10 für die Drums frei bleibt.
+
+**Rohkurve als CSV oder JSON.** Die Analyse ohne Notenraster, wahlweise im
+Analyse-Raster oder auf 200/100/50 Hz interpoliert:
+
+```
+t_s,hz,hz_raw,midi,amp,norm,voiced
+0.5900,660.052,1320.104,76.0209,0.99706,0.99591,1
+```
+
+`hz` nach den Reglern, `hz_raw` wie erkannt, `midi` als gebrochene Notennummer,
+`amp` die Lautstärke 0..1, `norm` die Lage im Umfang dieser Aufnahme (0 beim
+tiefsten, 1 beim höchsten Ton) und `voiced` als Flagge, ob der Wert gemessen
+oder nur Füllung ist. Beim Beat kommen stattdessen die drei Bandhüllkurven und
+eine Tabelle der Schläge. Das JSON enthält dieselben Werte spaltenweise plus
+die Reglerstellung, unter der sie entstanden sind.
 
 ## Deploy auf Netcup/Plesk per `git pull`
 
@@ -111,7 +142,8 @@ Sourcemaps lassen sich im selben Dialog abwählen.
 | `src/audio/pitch.js` | Tonhöhenerkennung (NSDF), Korrekturstufen, Notensegmentierung |
 | `src/audio/onset.js` | Beat-Erkennung, Klassifikation, Tempo |
 | `src/audio/synth.js` | Klangerzeugung, Offline-Rendering, WAV |
-| `src/audio/midi.js` | MIDI-Export, Format 1 |
+| `src/audio/midi.js` | MIDI-Export, Format 1 — klassisch und MPE |
+| `src/audio/curve.js` | Rohkurven-Export, CSV und JSON |
 | `src/data/instruments.js` | Instrumente und Drumkits |
 | `src/ui/` | Canvas und Bedienung |
 

@@ -9,14 +9,15 @@ anhören, als MIDI oder WAV rausgeben. Alles lokal, nichts verlässt das Gerät.
 src/audio/pitch.js       NSDF-Erkennung, medianFix/octaveFix, shapedCurve, segmentNotes
 src/audio/onset.js       Bandfilter, Hüllkurven, detectHits, estimateBPM, gridded
 src/audio/synth.js       renderMelody, renderBeat, renderMix, toWav
-src/audio/midi.js        buildMidi + SMF-Hilfsfunktionen
+src/audio/midi.js        buildMidi, buildMpe + SMF-Hilfsfunktionen
+src/audio/curve.js       melodyCurve, beatCurve, hitTable, toCsv, toJson
 src/data/instruments.js  INSTRUMENTS, KITS, GM-Zuordnung
 src/ui/canvas.js         drawMelody, drawBeat, drawLive
 src/ui/app.js            Zustand, Regler, Events
 ```
 
-`pitch.js`, `onset.js` und `midi.js` sind reine Zahlenverarbeitung: Float32Array
-und Samplerate rein, Werte raus. Kein DOM, kein WebAudio, kein Zugriff auf
+`pitch.js`, `onset.js`, `midi.js` und `curve.js` sind reine Zahlenverarbeitung:
+Float32Array und Samplerate rein, Werte raus. Kein DOM, kein WebAudio, kein Zugriff auf
 Regler. Sie sollen später nach Swift portiert werden — **wer dort einen
 `document.getElementById` oder eine Reglerabfrage einbaut, macht den Port
 kaputt**. Reglerwerte werden in `ui/app.js` gelesen und als Parameter
@@ -45,6 +46,37 @@ Hi-Hat verpassen als bei jedem schnellen Muster falsche `openhat` liefern.
 
 **Kein Persistenzbedarf.** Aufnahmen sind flüchtig, es gibt keinen Speicher, und
 es braucht auch keinen Ersatz für localStorage. Neu laden heißt neu anfangen.
+
+**Der Bend-Umfang ist ein Regler für beide MIDI-Formate.** Er entscheidet nicht
+nur, was in RPN 0 landet, sondern auch, wann `segmentNotes` eine neue Note
+anfängt — deshalb gibt es keinen zweiten Regler für MPE. Nur Obergrenze und
+Vorgabe unterscheiden sich (klassisch ±24 / ±12, MPE ±96 / ±48). Beim Umschalten
+ändert sich sichtbar die Notenzahl, und das ist der Punkt: bei ±48 passt eine
+gepfiffene Phrase fast immer in eine einzige Note mit Kurve.
+
+**Die MPE-Zone schrumpft, wenn Drums dabei sind.** Eine volle untere Zone belegt
+die Kanäle 2–16 und damit auch Kanal 10, wo die GM-Percussion liegt. Liegt ein
+Beat vor, bekommt die Zone acht statt fünfzehn Member-Kanäle. Die Melodiespur
+ist einstimmig; die Rotation dient nur dazu, dass der Bend einer ausklingenden
+Note nicht in die nächste hineinregiert.
+
+**Der Bend-Umfang steht im MPE-Export auf jedem Member-Kanal.** Laut
+Spezifikation genügt einer, weil RPN 0 auf einem Member für die ganze Zone gilt.
+Genau dieses „genügt eigentlich“ ist aber der Stolperstein, an dem Importe still
+auf ±2 stehenbleiben. Fünfzehnmal vier Bytes sind der Preis dafür, ihn zu
+umgehen.
+
+**CC74 im MPE-Export ist gemessen, nicht erfunden.** Die Y-Achse trägt, wie hoch
+im Umfang *dieser Aufnahme* gerade gepfiffen wird (`centsSpan`/`normPos` in
+`pitch.js`). Bezugsgröße ist bewusst die Aufnahme und nicht `FMIN..FMAX` — über
+den festen Pfeifbereich normiert bliebe von einer Terz ein Zwanzigstel des Wegs
+übrig. Dieselbe Größe steht im Kurven-Export in der Spalte `norm`. Wer eine
+dritte Dimension will, die niemand gepfiffen hat, zeichnet sie in der DAW.
+
+**Im Kurven-Export sind unstimmhafte Frames Nullen, keine Lücken.** Eine
+Modulationsquelle darf keine Löcher haben; `voiced` ist die einzige Spalte, die
+zwischen „gemessen“ und „nur Füllung“ unterscheidet. `hz` folgt den Reglern,
+`hz_raw` nicht — wer die unbearbeitete Erkennung will, nimmt die zweite Spalte.
 
 ## Constraints
 

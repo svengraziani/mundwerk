@@ -10,7 +10,8 @@ import './style.css'
 import { analyseMelody, shapedCurve, segmentNotes, detect, noteName } from '../audio/pitch.js'
 import { analyseBeat, detectHits, gridded } from '../audio/onset.js'
 import { renderMix, toWav } from '../audio/synth.js'
-import { buildMidi } from '../audio/midi.js'
+import { buildMidi, buildMpe, MPE_BEND_RANGE } from '../audio/midi.js'
+import { melodyCurve, beatCurve, hitTable, toCsv, toJson } from '../audio/curve.js'
 import { INSTRUMENTS, KITS, findInstrument, findKit } from '../data/instruments.js'
 import { clear, drawLive, drawMelody, drawBeat } from './canvas.js'
 
@@ -34,6 +35,7 @@ const S = { melody: null, beat: null }
 let renderCache = { melody: null, beat: null, both: null }
 let curInst = 'bone'
 let curKit = 'room'
+let midiFormat = 'classic'
 
 const cv = $('cv')
 
@@ -64,6 +66,7 @@ const melodyShape = () => ({
   quant: +$('quant').value / 100,
 })
 const bendRange = () => +$('bendRange').value
+const curveRate = () => +$('curveRate').value
 const gridAmount = () => +$('dgrid').value / 100
 const griddedHits = () => gridded(S.beat, gridAmount())
 const sourceRate = () => (S.melody ? S.melody.sr : S.beat ? S.beat.sr : recSR)
@@ -113,6 +116,8 @@ function refresh() {
   $('playBoth').classList.toggle('hidden', !(S.melody && S.beat))
   $('recTitle').textContent = d ? 'Neu aufnehmen' : 'Aufnehmen'
   $('playMain').textContent = mode === 'melody' ? 'Instrument abspielen' : 'Drums abspielen'
+  $('dlCsv').textContent = mode === 'melody' ? 'CSV sichern' : 'Hüllkurven als CSV'
+  $('dlCsvHits').classList.toggle('hidden', !S.beat)
   $('empty').style.display = d ? 'none' : 'flex'
   $('empty').textContent = mode === 'melody' ? 'Noch keine Melodie' : 'Noch kein Beat'
   if (d) {
@@ -495,8 +500,9 @@ $('dlMidi').onclick = () => {
     say('Erst etwas aufnehmen.', true)
     return
   }
+  const mpe = midiFormat === 'mpe'
   try {
-    const bytes = buildMidi({
+    const bytes = (mpe ? buildMpe : buildMidi)({
       melody: S.melody,
       notes: S.melody ? S.melody.notes : [],
       shaped: S.melody ? S.melody.shaped : null,
@@ -505,13 +511,76 @@ $('dlMidi').onclick = () => {
       hits: griddedHits(),
       bendRange: bendRange(),
     })
-    download(new Blob([bytes], { type: 'audio/midi' }), 'mundwerk.mid')
+    download(new Blob([bytes], { type: 'audio/midi' }), mpe ? 'mundwerk-mpe.mid' : 'mundwerk.mid')
     const parts = []
-    if (S.melody) parts.push(S.melody.notes.length + ' Noten mit Bend')
+    if (S.melody) parts.push(S.melody.notes.length + (mpe ? ' Noten auf eigenen Kanälen' : ' Noten mit Bend'))
     if (S.beat) parts.push(S.beat.hits.length + ' Drum-Schläge')
-    say('MIDI gesichert: ' + parts.join(', ') + '. Bend-Umfang im Ziel-Instrument auf ±' + bendRange() + ' stellen.')
+    say(
+      (mpe ? 'MPE gesichert: ' : 'MIDI gesichert: ') +
+        parts.join(', ') +
+        (mpe
+          ? '. Der Bend-Umfang ±' + bendRange() + ' steht auf jedem Stimmkanal — nichts von Hand nachstellen.'
+          : '. Bend-Umfang im Ziel-Instrument auf ±' + bendRange() + ' stellen.'),
+    )
   } catch (e) {
     say('MIDI-Export fehlgeschlagen: ' + e.message, true)
+  }
+}
+
+/* ══════════════ ROHKURVE ══════════════ */
+/** Was in eine Datei geschrieben wird — ohne DOM, das rechnet curve.js. */
+const melodyTable = () => melodyCurve(S.melody, S.melody.shaped, { rate: curveRate() })
+const beatTable = () => beatCurve(S.beat, { rate: curveRate() })
+
+/** Reglerstellung und Quelle mit in die JSON-Datei, damit sie nachvollziehbar bleibt. */
+const curveMeta = () => ({
+  app: 'mundwerk',
+  sampleRate: sourceRate(),
+  shape: melodyShape(),
+  instrument: findInstrument(curInst).id,
+  bpm: S.beat ? S.beat.bpm : 0,
+})
+
+function saveCsv(table, name) {
+  download(new Blob([toCsv(table)], { type: 'text/csv;charset=utf-8' }), 'mundwerk-' + name + '.csv')
+  say(table.rows.length + ' Zeilen gesichert (' + name + ').')
+}
+
+$('dlCsv').onclick = () => {
+  try {
+    if (mode === 'melody' && S.melody) saveCsv(melodyTable(), 'melodie')
+    else if (mode === 'beat' && S.beat) saveCsv(beatTable(), 'beat')
+    else say('Für diesen Modus liegt keine Aufnahme vor.', true)
+  } catch (e) {
+    say('CSV-Export fehlgeschlagen: ' + e.message, true)
+  }
+}
+
+$('dlCsvHits').onclick = () => {
+  if (!S.beat) return
+  try {
+    saveCsv(hitTable(griddedHits()), 'schlaege')
+  } catch (e) {
+    say('CSV-Export fehlgeschlagen: ' + e.message, true)
+  }
+}
+
+$('dlJson').onclick = () => {
+  if (!S.melody && !S.beat) {
+    say('Erst etwas aufnehmen.', true)
+    return
+  }
+  try {
+    const tables = []
+    if (S.melody) tables.push(melodyTable())
+    if (S.beat) tables.push(beatTable(), hitTable(griddedHits()))
+    download(
+      new Blob([toJson(tables, curveMeta())], { type: 'application/json' }),
+      'mundwerk-kurve.json',
+    )
+    say('JSON gesichert: ' + tables.map((t) => t.name).join(', ') + '.')
+  } catch (e) {
+    say('JSON-Export fehlgeschlagen: ' + e.message, true)
   }
 }
 
@@ -541,12 +610,57 @@ $('dlMidi').onclick = () => {
   }),
 )
 $('bendRange').addEventListener('input', () => {
-  $('bendRangeV').textContent = '±' + $('bendRange').value + ' Halbtöne'
+  showBendRange()
   if (S.melody) {
     recomputeMelody()
     refresh()
   }
 })
+
+/* ══════════════ MIDI-FORMAT ══════════════ */
+/**
+ * Der Bend-Umfang ist derselbe Regler für beide Formate — er entscheidet ja
+ * auch, wann `segmentNotes` eine neue Note anfängt. Nur die Grenzen und der
+ * Vorgabewert unterscheiden sich: MPE erlaubt bis ±96 und setzt ±48 voraus.
+ */
+const BEND_MAX = { classic: 24, mpe: 96 }
+const BEND_DEFAULT = { classic: 12, mpe: MPE_BEND_RANGE }
+const BEND_HINT = {
+  classic: 'Wird als RPN mitgeschickt. Muss im Ziel-Instrument gleich eingestellt sein, sonst klingen die Bends falsch.',
+  mpe: 'Steht auf jedem Stimmkanal in der Datei — MPE-Instrumente stellen sich selbst darauf ein. Je weiter, desto seltener muss eine Phrase in mehrere Noten zerfallen.',
+}
+
+const showBendRange = () => {
+  $('bendRangeV').textContent = '±' + $('bendRange').value + ' Halbtöne'
+}
+
+function setMidiFormat(f) {
+  midiFormat = f
+  document.querySelectorAll('.segb').forEach((b) => {
+    const on = b.dataset.fmt === f
+    b.classList.toggle('on', on)
+    b.setAttribute('aria-selected', on ? 'true' : 'false')
+  })
+  $('listClassic').classList.toggle('hidden', f !== 'classic')
+  $('listMpe').classList.toggle('hidden', f === 'classic')
+
+  // Den Wert vor dem Verschieben der Obergrenze lesen: sonst hat der Browser
+  // ihn schon geklemmt, und aus „steht noch auf der Vorgabe“ wird nie etwas.
+  const el = $('bendRange')
+  const prev = +el.value
+  const other = f === 'mpe' ? 'classic' : 'mpe'
+  el.max = BEND_MAX[f]
+  el.value = prev === BEND_DEFAULT[other] ? BEND_DEFAULT[f] : Math.min(prev, BEND_MAX[f])
+  $('bendHint').textContent = BEND_HINT[f]
+  showBendRange()
+
+  if (S.melody) {
+    recomputeMelody()
+    refresh()
+  }
+}
+
+document.querySelectorAll('.segb').forEach((b) => b.addEventListener('click', () => setMidiFormat(b.dataset.fmt)))
 
 addEventListener('resize', () => {
   if (S[mode]) draw()

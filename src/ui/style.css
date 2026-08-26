@@ -113,6 +113,11 @@ input[type=range]::-moz-range-thumb{width:17px;height:17px;border-radius:50%;bac
 .hidden{display:none!important}
 
 .midi-card{background:var(--ink2);border-radius:var(--r);padding:18px;margin-top:4px}
+.seg{display:flex;gap:5px;background:var(--ink);padding:4px;border-radius:11px}
+.segb{flex:1;padding:9px 8px;border-radius:8px;font-size:13.5px;font-weight:500;color:var(--muted);
+  text-align:center;transition:background .15s,color .15s}
+.segb.on{background:var(--ink3);color:var(--bone);box-shadow:inset 0 0 0 1px #63C0AC55}
+select.btn.wide{width:100%;text-align:left}
 .midi-list{display:grid;gap:9px;margin:14px 0 16px}
 .midi-item{display:flex;gap:11px;align-items:flex-start;font-size:13px;line-height:1.45}
 .midi-key{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ochre);

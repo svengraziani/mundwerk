@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import { readWav } from './wav.js'
 import { analyseMelody, shapedCurve, segmentNotes } from '../src/audio/pitch.js'
 import { analyseBeat, detectHits, gridded } from '../src/audio/onset.js'
-import { buildMidi, vlq, trackChunk, PPQ } from '../src/audio/midi.js'
+import {
+  buildMidi, buildMpe, vlq, trackChunk, PPQ,
+  MPE_BEND_RANGE, MPE_MEMBERS, MPE_MEMBERS_WITH_DRUMS,
+} from '../src/audio/midi.js'
 import { findInstrument } from '../src/data/instruments.js'
 
 /* ── ein kleiner SMF-Leser, damit die Tests am Byte prüfen ── */
@@ -61,12 +64,16 @@ function parseSmf(bytes) {
   return { header, tracks }
 }
 
-function melodyFrom(file) {
+function melodyFrom(file, bendRange = 12) {
   const { samples, sampleRate } = readWav(file)
   const m = analyseMelody(samples, sampleRate)
   const shaped = shapedCurve(m, { semis: 0, vib: 1, quant: 0 })
-  return { m, shaped, notes: segmentNotes(m, shaped, 12) }
+  return { m, shaped, notes: segmentNotes(m, shaped, bendRange) }
 }
+
+/** Die Controller-Paare (Nummer, Wert) eines Kanals in Reihenfolge. */
+const ccOf = (track, ch) =>
+  track.filter((e) => e.kind === 0xb0 && e.ch === ch).map((e) => [e.data[0], e.data[1]])
 
 function beatFrom(file) {
   const { samples, sampleRate } = readWav(file)
@@ -189,4 +196,135 @@ test('Das Tempo folgt dem geschätzten Beat, sonst 120', () => {
   const beat = beatFrom('beat-simple.wav')
   const withBeat = buildMidi({ melody: m, notes, shaped, instrument, beat, hits: gridded(beat, 0), bendRange: 12 })
   assert.equal(read(withBeat), beat.bpm)
+})
+
+/* ── MPE ───────────────────────────────────────────────── */
+test('MPE: untere Zone wird angemeldet, Master trägt das Programm', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-clean.wav', MPE_BEND_RANGE)
+  const instrument = findInstrument('bansuri')
+  const { header, tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument, beat: null, hits: [] }),
+  )
+  assert.equal(header.format, 1)
+  assert.equal(header.ntracks, 2)
+  const mel = tracks[1]
+
+  // MCM: RPN 6 auf dem Master, Wert = Anzahl der Member-Kanäle. Ohne Data
+  // Entry LSB — die MPE-Spezifikation kennt dort keins.
+  assert.deepEqual(ccOf(mel, 0), [[101, 0], [100, 6], [6, MPE_MEMBERS]])
+  assert.ok(
+    mel.some((e) => e.kind === 0xc0 && e.ch === 0 && e.data[0] === instrument.gm - 1),
+    'Program Change gehört auf den Master-Kanal',
+  )
+  // Auf dem Master liegen keine Noten.
+  assert.ok(!mel.some((e) => (e.kind === 0x90 || e.kind === 0x80) && e.ch === 0))
+})
+
+test('MPE: der Bend-Umfang steht auf jedem Member-Kanal', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-glide.wav', MPE_BEND_RANGE)
+  const { tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument: findInstrument('bone'), beat: null, hits: [] }),
+  )
+  const mel = tracks[1]
+  for (let ch = 1; ch <= MPE_MEMBERS; ch++) {
+    assert.deepEqual(
+      ccOf(mel, ch).slice(0, 4),
+      [[101, 0], [100, 0], [6, MPE_BEND_RANGE], [38, 0]],
+      `Kanal ${ch + 1} bekommt keinen Bend-Umfang`,
+    )
+  }
+})
+
+test('MPE: jede Note bekommt einen eigenen Kanal, reihum', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-clean.wav', MPE_BEND_RANGE)
+  const { tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument: findInstrument('sax'), beat: null, hits: [] }),
+  )
+  const mel = tracks[1]
+  const on = mel.filter((e) => e.kind === 0x90)
+  assert.equal(on.length, notes.length)
+  assert.ok(on.length > 1, 'zum Prüfen der Rotation braucht es mehr als eine Note')
+  assert.deepEqual(on.map((e) => e.ch), notes.map((_, i) => 1 + (i % MPE_MEMBERS)))
+
+  // Note-Off auf demselben Kanal wie das zugehörige Note-On.
+  const off = mel.filter((e) => e.kind === 0x80)
+  assert.deepEqual(off.map((e) => [e.ch, e.data[0]]), on.map((e) => [e.ch, e.data[0]]))
+})
+
+test('MPE: Ausdruck steht vor dem Note-On desselben Kanals', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-vibrato.wav', MPE_BEND_RANGE)
+  const { tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument: findInstrument('bone'), beat: null, hits: [] }),
+  )
+  const mel = tracks[1]
+
+  // Nur die erste Runde: danach wiederholen sich die Kanäle.
+  notes.slice(0, MPE_MEMBERS).forEach((nt, i) => {
+    const ch = 1 + i
+    const onAt = mel.findIndex((e) => e.kind === 0x90 && e.ch === ch)
+    assert.ok(onAt > 0, `kein Note-On auf Kanal ${ch + 1}`)
+    // Direkt davor: Bend, CC74 und Druck für genau diesen Kanal — nach dem
+    // RPN-Block, also mit demselben Tick wie das Note-On.
+    const before = mel.slice(0, onAt).filter((e) => e.ch === ch && e.t === mel[onAt].t)
+    assert.ok(before.some((e) => e.kind === 0xe0), 'Bend fehlt vor dem Note-On')
+    assert.ok(before.some((e) => e.kind === 0xb0 && e.data[0] === 74), 'CC74 fehlt vor dem Note-On')
+    assert.ok(before.some((e) => e.kind === 0xd0), 'Druck fehlt vor dem Note-On')
+  })
+})
+
+test('MPE: Bend, Druck und Timbre laufen pro Stimme mit', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-glide.wav', MPE_BEND_RANGE)
+  const { tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument: findInstrument('lead'), beat: null, hits: [] }),
+  )
+  const mel = tracks[1]
+  const ch = 1 // ein Glissando ist bei ±48 genau eine Note
+
+  const bends = mel.filter((e) => e.kind === 0xe0 && e.ch === ch).map((e) => e.data[0] | (e.data[1] << 7))
+  assert.ok(bends.length > 10, 'zu wenige Bend-Werte für eine ganze Phrase')
+  assert.ok(bends.every((v) => v >= 0 && v <= 16383))
+  assert.ok(Math.max(...bends) - Math.min(...bends) > 400, 'der Bend bewegt sich kaum')
+
+  const timbre = ccOf(mel, ch).filter(([n]) => n === 74).map(([, v]) => v)
+  assert.ok(timbre.length > 3, 'CC74 läuft nicht mit')
+  assert.ok(timbre.every((v) => v >= 0 && v <= 127))
+  assert.ok(Math.max(...timbre) - Math.min(...timbre) > 60, 'die Y-Achse folgt der Lage nicht')
+
+  const press = mel.filter((e) => e.kind === 0xd0 && e.ch === ch).map((e) => e.data[0])
+  assert.ok(press.length > 3, 'Channel Pressure läuft nicht mit')
+
+  // Zum Schluss steht jeder benutzte Kanal wieder neutral.
+  const last = mel.filter((e) => e.kind === 0xe0 && e.ch === ch).pop()
+  assert.deepEqual([...last.data], [0, 64])
+  assert.equal(mel.filter((e) => e.kind === 0xd0 && e.ch === ch).pop().data[0], 0)
+})
+
+test('MPE mit Drums: die Zone lässt Kanal 10 frei', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-clean.wav', MPE_BEND_RANGE)
+  const beat = beatFrom('beat-simple.wav')
+  const hits = gridded(beat, 0)
+  const { header, tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument: findInstrument('sax'), beat, hits }),
+  )
+  assert.equal(header.ntracks, 3)
+  const mel = tracks[1]
+  const drums = tracks[2]
+
+  assert.deepEqual(ccOf(mel, 0), [[101, 0], [100, 6], [6, MPE_MEMBERS_WITH_DRUMS]])
+  assert.ok(
+    mel.filter((e) => e.kind).every((e) => e.ch <= MPE_MEMBERS_WITH_DRUMS),
+    'die Melodie greift über die Zone hinaus und würde die Drums treffen',
+  )
+  assert.ok(!mel.some((e) => e.ch === 9), 'auf Kanal 10 darf keine Melodie liegen')
+  assert.ok(drums.filter((e) => e.kind).every((e) => e.ch === 9))
+  assert.equal(drums.filter((e) => e.kind === 0x90).length, hits.length)
+})
+
+test('MPE: ±48 machen aus einem Glissando eine einzige Note', () => {
+  const { m, shaped, notes } = melodyFrom('whistle-glide.wav', MPE_BEND_RANGE)
+  assert.equal(notes.length, 1, 'bei ±48 Halbtönen passt die ganze Phrase in eine Note')
+  const { tracks } = parseSmf(
+    buildMpe({ melody: m, notes, shaped, instrument: findInstrument('bone'), beat: null, hits: [] }),
+  )
+  assert.equal(tracks[1].filter((e) => e.kind === 0x90).length, 1)
 })
