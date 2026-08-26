@@ -1,4 +1,5 @@
-quelle: 01f908f0d56a46545aeef27553af732397f0e172
-ref:    claude/netcup-plesk-github-deploy-324olz
+commit: 31aa79b92cf40337f6aaeb485b92b30b759eb868
+ref:    main
 base:   ./
-gebaut: 2026-08-26T07:47:38Z
+lauf:   11
+gebaut: 2026-08-26T12:31:59Z
