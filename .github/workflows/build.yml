@@ -1,0 +1,84 @@
+name: Build
+
+# Baut dist/ und hängt es als Artefakt an den Lauf. GitHub liefert Artefakte
+# immer als ZIP aus — herunterladen, entpacken, Inhalt per SFTP hochladen.
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Basis-Pfad, z. B. /transformer/. Leer = relative Pfade (dann muss die URL auf / enden).'
+        required: false
+        default: './'
+      sourcemap:
+        description: 'Sourcemaps mitliefern'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        env:
+          BASE: ${{ inputs.base || './' }}
+        run: npm run build
+
+      - name: Sourcemaps entfernen
+        if: github.event_name == 'workflow_dispatch' && inputs.sourcemap == false
+        run: find dist -name '*.map' -delete
+
+      - name: Herkunft ins Paket schreiben
+        run: |
+          {
+            echo "commit: ${{ github.sha }}"
+            echo "ref:    ${{ github.ref_name }}"
+            echo "base:   ${{ inputs.base || './' }}"
+            echo "lauf:   ${{ github.run_number }}"
+            echo "gebaut: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > dist/BUILD.txt
+
+      - name: Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: mundwerk-dist-${{ github.run_number }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Zusammenfassung
+        run: |
+          {
+            echo "### Build fertig"
+            echo
+            echo "Artefakt **mundwerk-dist-${{ github.run_number }}** unten auf der Lauf-Seite herunterladen (ZIP)."
+            echo "Der ZIP-Inhalt ist bereits der Wurzelinhalt des Webverzeichnisses — entpacken und per SFTP hochladen."
+            echo
+            echo '```'
+            find dist -type f | sort
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
