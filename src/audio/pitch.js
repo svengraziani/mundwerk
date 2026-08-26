@@ -171,6 +171,45 @@ export function noteName(hz) {
   return NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1)
 }
 
+/** Cent gegen A440. NaN-frei nur für hz > 0 gedacht. */
+export const toCents = (hz) => 1200 * Math.log2(hz / 440)
+
+/**
+ * Tiefster und höchster stimmhafter Wert einer Frequenzkurve, in Cent.
+ *
+ * Grundlage für alles, was „wie hoch im eigenen Umfang“ ausdrücken soll: die
+ * Y-Achse im MPE-Export und die Spalte `norm` im Kurven-Export. Bezugsgröße ist
+ * bewusst die Aufnahme selbst und nicht FMIN..FMAX — über den festen
+ * Pfeifbereich normiert würde eine Terz auf ein Zwanzigstel des Wegs
+ * zusammenschrumpfen und wäre als Modulationsquelle wertlos.
+ *
+ * @param {Float32Array} freq
+ * @returns {{lo:number, hi:number}}  lo === hi === 0, wenn nichts stimmhaft war
+ */
+export function centsSpan(freq) {
+  let lo = Infinity
+  let hi = -Infinity
+  for (let i = 0; i < freq.length; i++) {
+    if (!(freq[i] > 0)) continue
+    const c = toCents(freq[i])
+    if (c < lo) lo = c
+    if (c > hi) hi = c
+  }
+  return lo <= hi ? { lo, hi } : { lo: 0, hi: 0 }
+}
+
+/**
+ * Lage im eigenen Umfang, 0..1.
+ * @param {number} hz                 0 → 0
+ * @param {{lo:number,hi:number}} span Ergebnis von centsSpan
+ * @returns {number}  0.5, wenn die Aufnahme praktisch nur einen Ton enthält
+ */
+export function normPos(hz, span) {
+  if (!(hz > 0)) return 0
+  if (span.hi - span.lo < 1) return 0.5
+  return Math.max(0, Math.min(1, (toCents(hz) - span.lo) / (span.hi - span.lo)))
+}
+
 /**
  * Kompletter Melodie-Durchlauf.
  *

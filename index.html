@@ -14,7 +14,7 @@
 <header>
   <div class="eyebrow">Prototyp · alles aus dem Mund</div>
   <h1>Pfeif es.<br>Beatbox es. <em>Nimm's mit.</em></h1>
-  <p class="lede">Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Beides geht als MIDI raus — mit Pitch Bend, Anschlagstärke und Druck, damit die Schleifer und die Dynamik in deiner DAW nicht verloren gehen.</p>
+  <p class="lede">Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Beides geht als MIDI raus — klassisch oder als MPE, mit Pitch Bend, Anschlagstärke und Druck. Und wenn du die nackte Kurve willst: Tonhöhe und Lautstärke als CSV.</p>
 </header>
 
 <div class="modes" role="tablist">
@@ -115,19 +115,57 @@
 
   <div class="sec" style="margin-top:38px"><h2>MIDI</h2><span>Format 1 · 480 PPQ</span></div>
   <div class="midi-card">
-    <div class="midi-list">
-      <div class="midi-item"><span class="midi-key">BEND</span><div><b>Pitch Bend, ±12 Halbtöne</b> <span>— alle 16 ms ein Wert. Deine Schleifer und das Vibrato überleben den Export.</span></div></div>
+    <div class="seg" role="tablist" aria-label="MIDI-Format">
+      <button class="segb on" data-fmt="classic" role="tab" aria-selected="true">Klassisch</button>
+      <button class="segb" data-fmt="mpe" role="tab" aria-selected="false">MPE</button>
+    </div>
+
+    <div class="midi-list" id="listClassic">
+      <div class="midi-item"><span class="midi-key">BEND</span><div><b>Pitch Bend auf Kanal 1</b> <span>— alle 16 ms ein Wert. Deine Schleifer und das Vibrato überleben den Export.</span></div></div>
       <div class="midi-item"><span class="midi-key">VEL</span><div><b>Velocity pro Note</b> <span>— aus der Lautstärke im Moment des Einsatzes.</span></div></div>
       <div class="midi-item"><span class="midi-key">AT</span><div><b>Channel Pressure</b> <span>— der Lautstärkeverlauf während der Note, alle 40 ms. Zusätzlich als CC11 für DAWs, die Aftertouch ignorieren.</span></div></div>
       <div class="midi-item"><span class="midi-key">CH10</span><div><b>Drums auf Kanal 10</b> <span>— General-MIDI-Belegung, Velocity aus der Anschlagstärke.</span></div></div>
     </div>
+
+    <div class="midi-list hidden" id="listMpe">
+      <div class="midi-item"><span class="midi-key">ZONE</span><div><b>Untere Zone, Kanal 1 als Master</b> <span>— die Anzahl der Stimmkanäle steht als MPE Configuration Message in der Datei. Liegt ein Beat dabei, wird die Zone kleiner, damit Kanal 10 für die Drums frei bleibt.</span></div></div>
+      <div class="midi-item"><span class="midi-key">1:1</span><div><b>Eine Note, ein Kanal</b> <span>— reihum. Damit gilt der Druck genau dieser Stimme statt allem, was gerade klingt, und der Bend biegt nur sie.</span></div></div>
+      <div class="midi-item"><span class="midi-key">BEND</span><div><b>Pitch Bend pro Stimme</b> <span>— der Umfang steht auf jedem Stimmkanal, nicht nur auf einem. Bei ±48 wird aus einer durchgezogenen Phrase eine einzige Note mit Kurve.</span></div></div>
+      <div class="midi-item"><span class="midi-key">CC74</span><div><b>Y-Achse mit echter Messung</b> <span>— wie hoch im Umfang dieser Aufnahme gerade gepfiffen wird. Alle 40 ms, zusammen mit dem Druck.</span></div></div>
+    </div>
+
     <div class="ctrl" style="margin-bottom:16px">
       <div class="ctop"><label for="bendRange">Bend-Umfang</label><span class="cval" id="bendRangeV">±12 Halbtöne</span></div>
       <input type="range" id="bendRange" min="2" max="24" step="1" value="12">
-      <div class="chint">Wird als RPN mitgeschickt. Muss im Ziel-Instrument gleich eingestellt sein, sonst klingen die Bends falsch.</div>
+      <div class="chint" id="bendHint">Wird als RPN mitgeschickt. Muss im Ziel-Instrument gleich eingestellt sein, sonst klingen die Bends falsch.</div>
     </div>
     <div class="row">
       <button class="btn primary" id="dlMidi">MIDI sichern</button>
+    </div>
+  </div>
+
+  <div class="sec" style="margin-top:38px"><h2>Rohkurve</h2><span id="curveMeta">CSV · JSON</span></div>
+  <div class="midi-card">
+    <div class="midi-list">
+      <div class="midi-item"><span class="midi-key">HZ</span><div><b>Tonhöhe je Zeitpunkt</b> <span>— als Frequenz und als gebrochene MIDI-Nummer, roh und nach den Reglern. Keine Noten, keine Rundung auf 7 Bit.</span></div></div>
+      <div class="midi-item"><span class="midi-key">AMP</span><div><b>Lautstärke je Zeitpunkt</b> <span>— 0 bis 1, aufs Maximum der Aufnahme bezogen.</span></div></div>
+      <div class="midi-item"><span class="midi-key">NORM</span><div><b>Lage im eigenen Umfang</b> <span>— 0 beim tiefsten, 1 beim höchsten Ton dieser Aufnahme. Die Spalte, die man an einen Filter hängt.</span></div></div>
+      <div class="midi-item"><span class="midi-key">BEAT</span><div><b>Beim Beat die drei Bänder</b> <span>— tief, mittel, hoch und ihre Summe. Die Schläge selbst gehen als eigene Tabelle raus, mit Typ und Anschlagstärke.</span></div></div>
+    </div>
+    <div class="ctrl" style="margin-bottom:16px">
+      <div class="ctop"><label for="curveRate">Abtastung</label></div>
+      <select class="btn small wide" id="curveRate">
+        <option value="0" selected>Analyse-Raster</option>
+        <option value="200">200 Hz</option>
+        <option value="100">100 Hz</option>
+        <option value="50">50 Hz</option>
+      </select>
+      <div class="chint">Das Analyse-Raster ist, was tatsächlich gemessen wurde. Die festen Raten werden daraus interpoliert — bequemer für alles, was ein gleichmäßiges Gitter erwartet.</div>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="dlCsv">CSV sichern</button>
+      <button class="btn hidden" id="dlCsvHits">Schläge als CSV</button>
+      <button class="btn" id="dlJson">JSON sichern</button>
     </div>
   </div>
 </section>

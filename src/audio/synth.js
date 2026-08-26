@@ -229,23 +229,53 @@ export function renderBeat(oc, dest, beat, { kit, hits, tune = 0 }) {
 }
 
 /**
+ * Rendern anstoßen und auf den Puffer warten.
+ *
+ * Safari kennt bis heute nur die Callback-Form: `startRendering()` liefert dort
+ * `undefined`, der Puffer kommt über `oncomplete`. Wer nur das Promise nimmt,
+ * bekommt still `undefined` zurück — kein Fehler, kein Ton, kein Hinweis
+ * worauf. Beide Formen bedienen, wie `decode()` in app.js.
+ */
+export function startRendering(oc) {
+  return new Promise((res, rej) => {
+    oc.oncomplete = (e) => res(e.renderedBuffer)
+    let p
+    try {
+      p = oc.startRendering()
+    } catch (e) {
+      rej(e)
+      return
+    }
+    if (p && typeof p.then === 'function') p.then(res, rej)
+  })
+}
+
+/**
  * Offline rendern.
+ *
  * @param {'melody'|'beat'|'both'} which
+ * @param {number} o.sr          Samplerate der Aufnahme — nur für die Dauer
+ * @param {number} o.renderRate  Samplerate des Ausgabekontexts
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function renderMix(which, { melody, beat, sr, melodyOpts, beatOpts }) {
-  let est = 0
-  if (which !== 'beat' && melody) est = Math.max(est, melody.buf.length / sr + 0.6)
-  if (which !== 'melody' && beat) est = Math.max(est, beat.buf.length / sr + 1.2)
-  if (est <= 0) return null
+export async function renderMix(which, { melody, beat, sr, renderRate, melodyOpts, beatOpts }) {
+  let sec = 0
+  if (which !== 'beat' && melody) sec = Math.max(sec, melody.buf.length / sr + 0.6)
+  if (which !== 'melody' && beat) sec = Math.max(sec, beat.buf.length / sr + 1.2)
+  if (sec <= 0) return null
 
-  const oc = new OfflineCtor(1, Math.ceil(est * sr), sr)
+  // Gerendert wird mit der Rate des Ausgabekontexts, nicht mit der der Quelle.
+  // iOS-Safari lehnt einen OfflineAudioContext ab, dessen Rate nicht zur
+  // Hardware passt — und eine geladene Datei bringt ihre eigene mit. Die
+  // Klangerzeugung rechnet ohnehin in Sekunden, ihr ist die Rate egal.
+  const rate = renderRate || sr
+  const oc = new OfflineCtor(1, Math.ceil(sec * rate), rate)
   const master = oc.createGain()
   master.gain.value = 0.9
   master.connect(oc.destination)
   if (which !== 'beat' && melody) renderMelody(oc, master, melody, melodyOpts)
   if (which !== 'melody' && beat) renderBeat(oc, master, beat, beatOpts)
-  return oc.startRendering()
+  return startRendering(oc)
 }
 
 /** Mono-16-Bit-WAV aus einem AudioBuffer. */
