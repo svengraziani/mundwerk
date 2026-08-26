@@ -80,6 +80,12 @@ zwischen „gemessen“ und „nur Füllung“ unterscheidet. `hz` folgt den Reg
 
 ## Constraints
 
+**Offline wird mit der Rate des Ausgabekontexts gerendert, nicht mit der der
+Quelle.** Eine geladene Datei bringt ihre eigene Samplerate mit, und iOS-Safari
+mag einen `OfflineAudioContext`, dessen Rate nicht zur Hardware passt, gar
+nicht. `renderMix` bekommt deshalb `sr` (für die Dauer) und `renderRate` (für
+die Puffergröße) getrennt.
+
 **`setValueCurveAtTime` verträgt keine überlappende Automation.** Pro AudioParam
 entweder *eine* Kurve über die gesamte Dauer oder ausschließlich
 `setValueAtTime`/Rampen — nie beides, nie zwei Kurven. Safari wirft, Chrome
@@ -89,7 +95,28 @@ verschluckt es still und liefert falschen Klang. `renderMelody` hält sich daran
 - `webkitAudioContext` / `webkitOfflineAudioContext` als Fallback, siehe `app.js` und `synth.js`.
 - Der AudioContext startet suspendiert; `resume()` geht nur aus einer Nutzergeste. Jeder Pfad, der Ton macht, hängt an einem Klick.
 - `decodeAudioData` gibt kein Promise zurück — beide Formen bedienen (`decode()` in `app.js`).
+- **`startRendering()` gibt ebenfalls kein Promise zurück.** Der Puffer kommt
+  über `oncomplete`. Wer nur das Promise nimmt, bekommt `undefined` — kein
+  Wurf, keine Meldung, kein Ton. `startRendering()` in `synth.js` bedient beide
+  Formen, `test/synth.test.js` hält das fest.
+- **Neben `suspended` gibt es `interrupted`.** Steht nicht in der
+  Spezifikation, kommt nach Anruf, Siri oder App-Wechsel und braucht dasselbe
+  `resume()`. Wer nur auf `suspended` prüft, spielt lautlos weiter.
 - Mikrofon braucht einen sicheren Kontext. localhost zählt, eine LAN-IP nicht.
+
+**Nach dem Aufnehmen muss der AudioContext weg.** iOS schaltet die
+Audio-Session beim ersten `createMediaStreamSource` auf „aufnehmen und
+abspielen" und legt die Ausgabe damit auf den Hörer statt auf den
+Lautsprecher. Die Mikrofonspur zu stoppen reicht nicht — solange derselbe
+Kontext lebt, bleibt die Session in diesem Modus, und alles danach klingt nach
+nichts. `dropRecordingCtx()` in `app.js` schließt ihn, `ensureCtx()` baut beim
+nächsten Antippen einen neuen. Wer den Kontext wieder über die Aufnahme hinaus
+am Leben lässt, macht die Wiedergabe auf dem iPhone wieder kaputt.
+
+**Auf iOS entscheidet der Stummschalter über WebAudio.** Ein `<audio>`-Element
+spielt bei stummgeschaltetem Klingelton weiter, WebAudio nicht. Das ist keine
+Sache des Codes; bleibt es nach allem oben still, gehört der Schalter am Rand
+des Geräts geprüft.
 
 **ScriptProcessorNode statt AudioWorklet.** Veraltet, aber überall gleich und für
 20 Sekunden Mono völlig ausreichend. Kein Grund zum Umbau.

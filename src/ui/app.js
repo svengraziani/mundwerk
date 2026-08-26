@@ -46,11 +46,40 @@ function say(t, err) {
 }
 
 async function ensureCtx() {
-  if (!ctx) ctx = new AC()
+  // Nach close() ist ein Kontext endgültig hin; dann muss ein neuer her.
+  if (!ctx || ctx.state === 'closed') {
+    ctx = new AC()
+    invalidate()
+  }
   // Safari startet den Kontext suspendiert und erlaubt resume() nur aus einer
   // Nutzergeste heraus — deshalb hängt jeder Aufruf an einem Klick.
-  if (ctx.state === 'suspended') await ctx.resume()
+  // 'interrupted' ist Safaris eigener Zustand nach Anruf, Siri oder
+  // App-Wechsel. Er steht nicht in der Spezifikation, verhält sich aber wie
+  // 'suspended' — wer nur auf 'suspended' prüft, spielt ins Leere.
+  if (ctx.state === 'suspended' || ctx.state === 'interrupted') await ctx.resume()
   return ctx
+}
+
+/**
+ * Den Kontext der Aufnahme wegwerfen.
+ *
+ * iOS schaltet die Audio-Session beim ersten `createMediaStreamSource` auf
+ * „aufnehmen und abspielen“ und legt die Ausgabe damit auf den Hörer am oberen
+ * Rand statt auf den Lautsprecher. Die Mikrofonspur zu stoppen reicht nicht:
+ * solange derselbe AudioContext lebt, bleibt die Session in diesem Modus, und
+ * jede Wiedergabe danach kommt bestenfalls flüsterleise aus dem Hörer. Ein
+ * frischer Kontext ist der einzige Weg zurück auf den Lautsprecher.
+ */
+function dropRecordingCtx() {
+  const old = ctx
+  ctx = null
+  srcNode = null
+  node = null
+  stream = null
+  playing = null
+  if (old && old.state !== 'closed') old.close().catch(() => {})
+  // Die neue Rate kann eine andere sein — Gerendertes gilt nicht mehr.
+  invalidate()
 }
 
 function invalidate(k) {
@@ -227,6 +256,7 @@ function stopRec() {
     srcNode.disconnect()
   } catch (e) {}
   stream.getTracks().forEach((t) => t.stop())
+  dropRecordingCtx()
   $('rec').classList.remove('armed')
   $('rec').setAttribute('aria-label', 'Aufnahme starten')
   $('readout').classList.remove('on')
@@ -408,12 +438,18 @@ async function render(which) {
     melody: S.melody,
     beat: S.beat,
     sr: sourceRate(),
+    // Ausgeben wird mit der Rate des Kontexts, der es abspielt — nicht mit der
+    // der Quelle. Eine geladene Datei bringt ihre eigene mit, und iOS-Safari
+    // legt einen OfflineAudioContext mit fremder Rate gern lahm.
+    renderRate: ctx ? ctx.sampleRate : sourceRate(),
     melodyOpts: S.melody
       ? { instrument: findInstrument(curInst), shaped: S.melody.shaped, breath: +$('breath').value / 100 }
       : null,
     beatOpts: S.beat ? { kit: findKit(curKit), hits: griddedHits(), tune: +$('dtune').value } : null,
   })
-  renderCache[which] = b
+  // Nur echte Puffer merken: ein leeres Ergebnis als Treffer zu speichern
+  // hieße, den Fehler bei jedem weiteren Tippen zu wiederholen.
+  if (b) renderCache[which] = b
   return b
 }
 
@@ -434,6 +470,13 @@ async function playBuf(b, label) {
   s.connect(ctx.destination)
   s.start()
   playing = s
+  // Ein Kontext, der nicht läuft, spielt lautlos weiter — ohne Fehler, ohne
+  // Hinweis. Lieber einmal zu viel sagen, als den Nutzer aufs Nichts starren
+  // lassen.
+  if (ctx.state !== 'running') {
+    say('Der Ton hängt: Audio-Kontext steht auf „' + ctx.state + '“. Nochmal tippen.', true)
+    return
+  }
   say('Spielt: ' + label)
 }
 
@@ -448,6 +491,7 @@ async function withRender(btn, which, label) {
     btn.disabled = false
     btn.textContent = old
     if (b) playBuf(b, label)
+    else say('Das Rendern hat nichts geliefert — nichts zum Abspielen da.', true)
   } catch (e) {
     btn.disabled = false
     btn.textContent = old
