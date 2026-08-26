@@ -103,15 +103,28 @@ export function analyseBeat(buf, sr) {
   return { buf, sr, env, tot, frameH: H, hits: [], bpm: 0 }
 }
 
+/** Frames vor dem Einsatz, aus denen die Grundlinie geschätzt wird (15 ms). */
+const BASE_FRAMES = 3
+/** Fenster nach dem Einsatz, das den Charakter des Schlags bestimmt. */
+const CHAR_SEC = 0.03
+/** So weit wird der Ausklang höchstens verfolgt. */
+const DECAY_MAX_SEC = 0.35
+/** Ab dieser Abklingdauer gilt eine Hi-Hat als offen. */
+const OPEN_SEC = 0.13
+
 /**
  * Einsätze finden und klassifizieren.
+ *
+ * Zwei Durchgänge: erst alle Einsatzframes, dann die Klassifikation. Die
+ * braucht den *nächsten* Einsatz als Fenstergrenze und kann deshalb nicht schon
+ * im ersten Durchgang passieren.
  *
  * @param {object} beat   Ergebnis von analyseBeat
  * @param {number} sens   0..1, höher findet leisere Schläge
  * @returns {{hits: Array<{t,type,vel}>, bpm: number}}
  */
 export function detectHits(beat, sens = 0.5) {
-  const { tot, env, frameH, sr } = beat
+  const { tot, frameH, sr } = beat
   const n = tot.length
   const thr = 0.3 - sens * 0.26 // 0.30 … 0.04
   const refract = Math.round(0.055 / (frameH / sr))
@@ -120,48 +133,102 @@ export function detectHits(beat, sens = 0.5) {
   for (let i = 1; i < n; i++) flux[i] = Math.max(0, tot[i] - tot[i - 1])
   smooth(flux, 3)
 
-  const hits = []
+  const onsets = []
   let lastI = -999
   for (let i = 2; i < n - 2; i++) {
     if (flux[i] < thr * 0.5) continue
     if (!(flux[i] >= flux[i - 1] && flux[i] > flux[i + 1])) continue
     if (tot[i] < thr * 0.55) continue
     if (i - lastI < refract) continue
-
-    // 30 ms nach dem Einsatz mitteln → Charakter des Schlags
-    const w = Math.round(0.03 / (frameH / sr))
-    let lo = 0, mid = 0, hi = 0, peak = 0
-    for (let k = i; k < Math.min(n, i + w); k++) {
-      lo += env[0][k]
-      mid += env[1][k]
-      hi += env[2][k]
-      peak = Math.max(peak, tot[k])
-    }
-    const sum = lo + mid + hi || 1
-    const L = lo / sum
-    const M = mid / sum
-    const H = hi / sum
-
-    // Abklingdauer trennt offene von geschlossener Hi-Hat
-    let dec = 0
-    for (let k = i; k < Math.min(n, i + Math.round(0.35 / (frameH / sr))); k++) if (tot[k] > peak * 0.3) dec = k - i
-    const decSec = dec * (frameH / sr)
-
-    let type
-    if (L > 0.52) type = 'kick'
-    else if (H > 0.42 && L < 0.3) type = decSec > 0.13 ? 'openhat' : 'hat'
-    else if (M > 0.34 || (H > 0.25 && L > 0.22)) type = 'snare'
-    else type = L > M ? 'kick' : 'hat'
-
-    hits.push({
-      t: (i * frameH) / sr,
-      type,
-      vel: Math.max(24, Math.min(127, Math.round(28 + peak * 99))),
-    })
+    onsets.push(i)
     lastI = i
   }
 
+  const hits = onsets.map((i, k) => classify(beat, i, k + 1 < onsets.length ? onsets[k + 1] : n))
   return { hits, bpm: estimateBPM(hits) }
+}
+
+/**
+ * Einen einzelnen Einsatz einordnen.
+ *
+ * Gemessen wird nicht die absolute Bandenergie, sondern der *Zuwachs* gegenüber
+ * dem, was unmittelbar vor dem Einsatz schon anlag. Sonst zählt die abklingende
+ * Fahne des Vorgängers mit und eine Hi-Hat direkt nach einer Kick sieht aus wie
+ * eine Snare.
+ *
+ * @param {number} i     Einsatzframe
+ * @param {number} next  Frame des nächsten Einsatzes (oder Ende des Signals)
+ */
+function classify(beat, i, next) {
+  const { tot, env, frameH, sr } = beat
+  const n = tot.length
+  const frameSec = frameH / sr
+
+  // Grundlinie je Band. Das Minimum der Frames davor ist zweierlei zugleich:
+  // bei abklingender Fahne der Pegel im Moment des Einsatzes, und falls die
+  // Glättung des Flusses den Peak ein, zwei Frames nach hinten geschoben hat,
+  // der Pegel vor dem Anstieg.
+  const base = [0, 0, 0]
+  for (let b = 0; b < 3; b++) {
+    let m = Infinity
+    for (let k = Math.max(0, i - BASE_FRAMES); k < i; k++) m = Math.min(m, env[b][k])
+    base[b] = Number.isFinite(m) ? m : 0
+  }
+  const rise = (b, k) => Math.max(0, env[b][k] - base[b])
+
+  // Charakterfenster, aber nie über den nächsten Einsatz hinaus.
+  const charEnd = Math.min(next, i + Math.round(CHAR_SEC / frameSec), n)
+  let lo = 0
+  let mid = 0
+  let hi = 0
+  let peak = 0
+  for (let k = i; k < charEnd; k++) {
+    lo += rise(0, k)
+    mid += rise(1, k)
+    hi += rise(2, k)
+    peak = Math.max(peak, tot[k])
+  }
+  const sum = lo + mid + hi || 1
+  const L = lo / sum
+  const M = mid / sum
+  const H = hi / sum
+
+  // Abklingdauer: im hohen Band, denn dort liegt der Unterschied zwischen
+  // offener und geschlossener Hi-Hat. Vom Maximum bis zum ersten Unterschreiten
+  // von 30 % — und nie über den nächsten Einsatz hinaus, sonst misst man den
+  // nächsten Schlag statt diesen hier. Steht der nächste Schlag zu dicht, bleibt
+  // die Fahne unbeobachtet und die Hi-Hat gilt als geschlossen, statt zu raten.
+  const decEnd = Math.min(next, i + Math.round(DECAY_MAX_SEC / frameSec), n)
+  let top = 0
+  let topK = i
+  for (let k = i; k < charEnd; k++) {
+    const v = rise(2, k)
+    if (v > top) {
+      top = v
+      topK = k
+    }
+  }
+  let dec = decEnd - i
+  if (top <= 0) dec = 0
+  else
+    for (let k = topK; k < decEnd; k++)
+      if (rise(2, k) < top * 0.3) {
+        dec = k - i
+        break
+      }
+  const decSec = dec * frameSec
+
+  let type
+  if (L > 0.52) type = 'kick'
+  else if (H > 0.42 && L < 0.3) type = decSec > OPEN_SEC ? 'openhat' : 'hat'
+  else if (M > 0.34 || (H > 0.25 && L > 0.22)) type = 'snare'
+  else type = L > M ? 'kick' : 'hat'
+
+  return {
+    t: (i * frameH) / sr,
+    type,
+    vel: Math.max(24, Math.min(127, Math.round(28 + peak * 99))),
+  }
 }
 
 /** Tempo aus dem Median-Abstand, unter der Annahme, der sei ein Achtel. */

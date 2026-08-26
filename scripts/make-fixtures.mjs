@@ -160,13 +160,14 @@ function snare(dur = 0.2) {
   return x
 }
 
-function hat(dur = 0.10) {
+/** Hi-Hat. `decay` ist die Zeitkonstante — geschlossen 20 ms, offen 250 ms. */
+function hat(dur = 0.10, decay = 0.020) {
   const n = Math.round(dur * SR)
   const raw = new Float32Array(n)
   for (let i = 0; i < n; i++) raw[i] = noise()
   const hp = biquad(biquad(raw, 'highpass', 7500, 0.8), 'highpass', 7500, 0.8)
   const x = new Float32Array(n)
-  for (let i = 0; i < n; i++) x[i] = hp[i] * Math.exp(-(i / SR) / 0.020)
+  for (let i = 0; i < n; i++) x[i] = hp[i] * Math.exp(-(i / SR) / decay)
   return x
 }
 
@@ -284,8 +285,9 @@ function beatFixture({ file, label, bpm, pattern, bars = 2, lead = 0.15 }) {
   for (let b = 0; b < bars; b++) {
     for (const [step, type] of pattern) {
       const t = lead + b * barLen + step * (beat / 4)
-      const src = type === 'kick' ? kick() : type === 'snare' ? snare() : hat()
-      mixInto(x, src, t, type === 'hat' ? 0.9 : 1)
+      const src =
+        type === 'kick' ? kick() : type === 'snare' ? snare() : type === 'openhat' ? hat(0.9, 0.25) : hat()
+      mixInto(x, src, t, type === 'kick' || type === 'snare' ? 1 : 0.9)
       hits.push({ t: +t.toFixed(4), type })
     }
   }
@@ -313,6 +315,20 @@ beatFixture({
   pattern: [
     [0, 'kick'], [6, 'kick'], [4, 'snare'], [12, 'snare'],
     ...[1, 2, 3, 5, 7, 8, 9, 10, 11, 13, 14, 15].map((i) => [i, 'hat']),
+  ],
+})
+
+// Offene Hi-Hat am Taktende, mit drei Sechzehnteln Luft dahinter: nur so lässt
+// sich die Abklingdauer überhaupt messen. Ohne diese Fixture würde ein Fix, der
+// 'openhat' einfach nie mehr vergibt, die Testsuite bestehen.
+beatFixture({
+  file: 'beat-openhat.wav',
+  label: 'Beat — offene Hi-Hat am Taktende, 100 BPM',
+  bpm: 100,
+  bars: 3,
+  pattern: [
+    [0, 'kick'], [2, 'hat'], [4, 'snare'], [6, 'hat'],
+    [8, 'kick'], [10, 'hat'], [12, 'openhat'],
   ],
 })
 

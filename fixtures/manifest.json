@@ -376,5 +376,100 @@
         }
       ]
     }
+  },
+  {
+    "file": "beat-openhat.wav",
+    "label": "Beat — offene Hi-Hat am Taktende, 100 BPM",
+    "mode": "beat",
+    "seconds": 7.95,
+    "expect": {
+      "bpm": 100,
+      "hits": [
+        {
+          "t": 0.15,
+          "type": "kick"
+        },
+        {
+          "t": 0.45,
+          "type": "hat"
+        },
+        {
+          "t": 0.75,
+          "type": "snare"
+        },
+        {
+          "t": 1.05,
+          "type": "hat"
+        },
+        {
+          "t": 1.35,
+          "type": "kick"
+        },
+        {
+          "t": 1.65,
+          "type": "hat"
+        },
+        {
+          "t": 1.95,
+          "type": "openhat"
+        },
+        {
+          "t": 2.55,
+          "type": "kick"
+        },
+        {
+          "t": 2.85,
+          "type": "hat"
+        },
+        {
+          "t": 3.15,
+          "type": "snare"
+        },
+        {
+          "t": 3.45,
+          "type": "hat"
+        },
+        {
+          "t": 3.75,
+          "type": "kick"
+        },
+        {
+          "t": 4.05,
+          "type": "hat"
+        },
+        {
+          "t": 4.35,
+          "type": "openhat"
+        },
+        {
+          "t": 4.95,
+          "type": "kick"
+        },
+        {
+          "t": 5.25,
+          "type": "hat"
+        },
+        {
+          "t": 5.55,
+          "type": "snare"
+        },
+        {
+          "t": 5.85,
+          "type": "hat"
+        },
+        {
+          "t": 6.15,
+          "type": "kick"
+        },
+        {
+          "t": 6.45,
+          "type": "hat"
+        },
+        {
+          "t": 6.75,
+          "type": "openhat"
+        }
+      ]
+    }
   }
 ]

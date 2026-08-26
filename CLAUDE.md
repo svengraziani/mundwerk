@@ -38,6 +38,11 @@ Oktave *eine* Note mit Bend-Kurve. Das ist Absicht.
 **Nur der Pfeifbereich.** `FMIN = 380`, `FMAX = 4200`. Summen und Sprechen
 liegen darunter und werden bewusst nicht erkannt.
 
+**Im Zweifel geschlossen.** Ob eine Hi-Hat offen ist, entscheidet die
+Abklingdauer im hohen Band. Steht der nächste Schlag so dicht, dass die Fahne
+gar nicht zu beobachten ist, gilt sie als geschlossen. Lieber eine offene
+Hi-Hat verpassen als bei jedem schnellen Muster falsche `openhat` liefern.
+
 **Kein Persistenzbedarf.** Aufnahmen sind flüchtig, es gibt keinen Speicher, und
 es braucht auch keinen Ersatz für localStorage. Neu laden heißt neu anfangen.
 
@@ -76,6 +81,23 @@ Aufnahmeknopf — nichts reinpfeifen müssen.
 Ändert eine Änderung absichtlich das Analyseergebnis, gehört die neue Erwartung
 in `fixtures/manifest.json` bzw. in den Test — nicht die Toleranz hochgedreht.
 
+## Wie ein Schlag eingeordnet wird
+
+`classify()` in `onset.js` misst nicht die absolute Bandenergie nach dem
+Einsatz, sondern den **Zuwachs** gegenüber dem, was unmittelbar davor schon
+anlag (Minimum der drei Frames davor). Ohne diesen Abzug zählt die abklingende
+Fahne des Vorgängers mit, und eine Hi-Hat direkt nach einer Kick sieht aus wie
+eine Snare.
+
+Beide Messfenster enden spätestens am **nächsten Einsatz**. Deshalb läuft
+`detectHits` in zwei Durchgängen: erst alle Einsatzframes sammeln, dann
+klassifizieren — die Fenstergrenze steht sonst nicht fest.
+
+Wer daran etwas ändert, sollte vorher `test/onset.test.js` lesen. Die Tests dort
+prüfen beide Richtungen: geschlossene Hi-Hats dürfen nicht offen werden *und*
+offene müssen offen bleiben. Ein Fix, der `openhat` einfach nie mehr vergibt,
+fällt durch.
+
 ## Bekannte Schwächen
 
 Als `todo`-Tests hinterlegt, laufen also mit, ohne die Suite rot zu machen:
@@ -83,12 +105,10 @@ Als `todo`-Tests hinterlegt, laufen also mit, ohne die Suite rot zu machen:
 1. **Hallfahnen verschmelzen Phrasen.** Bei verhalltem Pfeifen bleibt die Fahne
    stimmhaft, die Pause fällt aus, drei Töne werden eine Note.
    (`test/pitch.test.js`, `whistle-reverb.wav`)
-2. **Hi-Hats werden als offen gemeldet.** `detectHits` misst die Abklingdauer
-   350 ms voraus und läuft dabei in den nächsten Schlag. Ab etwa 170 BPM ist
-   jede Hi-Hat „openhat“. (`test/onset.test.js`)
-3. **Ausläufer färben die Klassifikation.** Das 30-ms-Fenster nach dem Einsatz
-   misst den Vorgänger mit; in dichten Mustern kippen Hi-Hats direkt nach einer
-   Kick zu Snare oder Kick. (`test/onset.test.js`, `beat-fast.wav`)
+2. **Die Kick löst doppelt aus.** Etwa 90 ms nach einer Kick meldet die
+   Flusserkennung einen zweiten Einsatz — je nach Fixture drei bis fünf zu viel.
+   Die Refraktärzeit von 55 ms greift dagegen nicht, und sie hochzudrehen würde
+   Sechzehntel ab 140 BPM verschlucken. (`test/onset.test.js`)
 
-Alle drei sind Fehler in der Analyse, nicht in den Fixtures. Wer sie angeht:
-erst den `todo`-Marker entfernen, dann grün machen.
+Beide sind Fehler in der Analyse, nicht in den Fixtures. Wer sie angeht: erst
+den `todo`-Marker entfernen, dann grün machen.

@@ -24,11 +24,18 @@ Test nur bestätigen, was der Code ohnehin gerade tut.
 | `error-quiet.wav` | unter dem RMS-Gate: muss `null` liefern, nicht raten |
 | `error-noise.wav` | nur Rauschen: dito |
 | `beat-simple.wav` | Kick/Snare/Hat, 100 BPM, jeder Schlag auf eigenem Sechzehntel |
-| `beat-fast.wav` | dichte Sechzehntel, 140 BPM |
+| `beat-fast.wav` | dichte Sechzehntel, 140 BPM — Hi-Hat direkt nach der Kick |
+| `beat-openhat.wav` | offene Hi-Hat am Taktende, mit Luft dahinter |
 
 Zwei Schläge zur exakt gleichen Zeit sind für eine Onset-Erkennung per
 Definition *ein* Einsatz — die Muster setzen deshalb nie Kick und Hi-Hat auf
 denselben Zeitpunkt.
+
+`beat-openhat.wav` gibt es aus einem bestimmten Grund: alle anderen Beats
+enthalten nur geschlossene Hi-Hats. Ein Fix, der `openhat` einfach nie mehr
+vergibt, würde ohne diese Fixture die ganze Suite bestehen. Die offene Hi-Hat
+sitzt deshalb am Taktende, mit drei Sechzehnteln Luft dahinter — anders lässt
+sich eine Abklingdauer gar nicht messen.
 
 Die Dateien liegen absichtlich außerhalb von `public/`: der Dev-Server
 liefert sie unter `/fixtures/…` aus, `vite build` nimmt sie nicht mit.

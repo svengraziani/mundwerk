@@ -13,7 +13,7 @@ Kein Framework, keine Laufzeit-Abhängigkeiten — Vite ist das ganze Setup.
 
 ## Ohne Mikrofon arbeiten
 
-Im Dev-Server steht neben dem Aufnahmeknopf ein Auswahlfeld mit zehn
+Im Dev-Server steht neben dem Aufnahmeknopf ein Auswahlfeld mit elf
 Testaufnahmen aus `fixtures/`, dazu „Datei laden“ für eigenes Material. Die
 Analyse ist derselbe Pfad wie bei einer Aufnahme.
 
