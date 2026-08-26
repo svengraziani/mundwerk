@@ -23,6 +23,34 @@ npm run fixtures   # Fixtures neu erzeugen (deterministisch)
 npm run build
 ```
 
+## Deploy auf Netcup/Plesk per `git pull`
+
+Plesk zieht das Repo direkt nach `httpdocs/`. Ausgeliefert wird aber nur der
+Build, und dafür sorgt die `.htaccess` im Wurzelverzeichnis: sie schreibt jede
+Anfrage nach `dist/` um — `/` auf `dist/index.html`, `/assets/…` auf
+`dist/assets/…`. Alles andere (`src/`, `test/`, `fixtures/`, `package.json`)
+landet ebenfalls unter `dist/` und damit im 404, ist also von außen nicht zu
+sehen. `.git/` wird zusätzlich hart abgewiesen.
+
+Weil auf dem Server nichts gebaut wird, liegt `dist/` im Repo. Nach jeder
+Änderung an `src/` oder `index.html` gehört deshalb der neue Build in denselben
+Commit:
+
+```
+npm test
+npm run build
+git add dist && git commit
+```
+
+Danach in Plesk „Pull“ auslösen (oder den Webhook laufen lassen) — mehr
+passiert auf dem Server nicht. `dist/BUILD.txt` sagt, aus welchem Commit der
+liegende Stand gebaut wurde.
+
+Das Mikrofon braucht einen sicheren Kontext: ohne HTTPS bleibt der
+Aufnahmeknopf tot. In Plesk dafür „Dauerhafte SEO-sichere 301-Umleitung von
+HTTP zu HTTPS“ setzen; die `.htaccess` enthält denselben Umweg als
+auskommentierten Notnagel.
+
 ## Build aus der Pipeline holen
 
 `.github/workflows/build.yml` läuft bei jedem Push: `npm ci`, `npm test`,
