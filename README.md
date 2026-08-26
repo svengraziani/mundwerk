@@ -66,6 +66,30 @@ Aufnahmeknopf tot. In Plesk dafür „Dauerhafte SEO-sichere 301-Umleitung von
 HTTP zu HTTPS“ setzen; die `.htaccess` enthält denselben Umweg als
 auskommentierten Notnagel.
 
+### In einem Unterordner neben WordPress
+
+Liegt in `httpdocs/` ein WordPress und das Repo darunter in
+`httpdocs/transformer/`, funktioniert dieselbe `.htaccess` unverändert — sie
+enthält absichtlich kein `RewriteBase`. Wer dort `RewriteBase /` einträgt,
+landet im WordPress: die Regeln zeigen dann auf `/dist/…` in der Wurzel, das
+gibt es nicht, und die `.htaccess` des WordPress reicht die Anfrage an ihre
+`index.php` weiter.
+
+Landet man trotzdem im WordPress, der Reihe nach prüfen:
+
+* Liegt die `.htaccess` wirklich in `httpdocs/transformer/` und nicht nur in
+  der Wurzel? Plesk zeigt versteckte Dateien nur mit gesetztem Haken an.
+* Wird der Ordner mit Schrägstrich am Ende aufgerufen (`…/transformer/`)? Ohne
+  ihn zeigen die relativen Asset-Pfade des Builds ins Leere. Für einen festen
+  Unterpfad ohne diese Bedingung mit `BASE=/transformer/ npm run build` bauen.
+* Ist `AllowOverride` für das Verzeichnis aktiv? Ohne das wird die `.htaccess`
+  gar nicht gelesen und der Server fällt auf die Regeln der Wurzel zurück.
+* Steht in der vHost-Konfiguration `RewriteOptions Inherit`, greifen die
+  WordPress-Regeln auch hier unten. Dann in diesem Ordner
+  `RewriteOptions Ignore Inherit` ergänzen.
+* Bleibt es dabei, den Pfad in der `.htaccess` fest eintragen: die Zeile
+  `RewriteBase /transformer/` steht dort auskommentiert bereit.
+
 ## Build aus der Pipeline holen
 
 `.github/workflows/build.yml` läuft bei jedem Push: `npm ci`, `npm test`,

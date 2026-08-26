@@ -6,12 +6,27 @@
 #
 # Nach jedem `git pull` auf dem Server ist der Stand von dist/ der Stand, der
 # im Repo liegt. Der Build gehört also mit ins Repo (siehe README).
+#
+# Diese Datei liegt bewusst „ortsunabhängig“: sie funktioniert im Wurzel-
+# verzeichnis genauso wie in einem Unterordner (httpdocs/transformer/), etwa
+# neben einem WordPress in der Wurzel. Deshalb steht hier **kein**
+# `RewriteBase`. Ein `RewriteBase /` würde die Ziele der Regeln an die Wurzel
+# hängen: aus dist/index.html würde /dist/index.html statt
+# /transformer/dist/index.html — das gibt es nicht, und die .htaccess der
+# Wurzel (WordPress) schickt die Anfrage dann an ihre index.php. Man landet
+# also im WordPress statt im Build.
+
+Options -MultiViews -Indexes
+
+# Ein 404 in diesem Ordner soll hier bleiben. Ohne diese Zeile greift ein
+# `ErrorDocument 404 /index.php` aus der Wurzel — das erbt bis hier herunter
+# und liefert die 404-Seite von WordPress aus.
+ErrorDocument 404 default
 
 DirectoryIndex dist/index.html
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /
 
   # Versteckte Verzeichnisse und Dateien gar nicht erst anfassen (.git, .github).
   RewriteRule (^|/)\. - [F,L]
@@ -23,6 +38,10 @@ DirectoryIndex dist/index.html
   RewriteRule ^$ dist/index.html [L]
 
   # Alles andere aus dist/ holen: /assets/index-abc123.js -> dist/assets/…
+  # Die Ziele sind relativ; Apache setzt den Pfad dieses Ordners davor. Nur
+  # falls der Server das nicht selbst hinbekommt (Alias, exotische vHost-
+  # Konfiguration), den Pfad hier fest eintragen:
+  #   RewriteBase /transformer/
   RewriteRule ^(.*)$ dist/$1 [L]
 </IfModule>
 
