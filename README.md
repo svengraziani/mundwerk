@@ -32,19 +32,34 @@ Anfrage nach `dist/` um — `/` auf `dist/index.html`, `/assets/…` auf
 landet ebenfalls unter `dist/` und damit im 404, ist also von außen nicht zu
 sehen. `.git/` wird zusätzlich hart abgewiesen.
 
-Weil auf dem Server nichts gebaut wird, liegt `dist/` im Repo. Nach jeder
-Änderung an `src/` oder `index.html` gehört deshalb der neue Build in denselben
-Commit:
+Weil auf dem Server nichts gebaut wird, liegt `dist/` im Repo. Von Hand
+mitcommitten muss man es aber nicht: Bei jedem Push auf `main` baut die
+Pipeline und schiebt das Ergebnis als eigenen Commit hinterher
+(`Build: dist/ aus <commit> [skip ci]`). Wer auf `main` pusht, findet dort
+kurz darauf den passenden Build. Danach in Plesk „Pull“ auslösen oder den
+Webhook laufen lassen — mehr passiert auf dem Server nicht.
+`dist/BUILD.txt` sagt, aus welchem Commit der liegende Stand gebaut wurde.
+
+Zwei Dinge müssen dafür stimmen:
+
+* Settings → Actions → General → Workflow permissions steht auf
+  **„Read and write permissions“**. Sonst ist der Token trotz `contents: write`
+  schreibgeschützt und der Push scheitert mit 403 — der Lauf wird rot und sagt
+  das auch.
+* Schützt eine Branch-Regel `main`, braucht sie eine Ausnahme für
+  `github-actions[bot]`.
+
+**Auf Feature-Branches macht die Pipeline das absichtlich nicht.** Zwei
+Branches mit je eigenem Build kollidieren beim Merge in denselben gehashten
+Dateinamen. Dort also `dist/` in Ruhe lassen; nach dem Merge baut der Lauf auf
+`main` den richtigen Stand. Ein Build von Hand ist nur nötig, wenn die Pipeline
+mal nicht kann:
 
 ```
 npm test
 npm run build
 git add dist && git commit
 ```
-
-Danach in Plesk „Pull“ auslösen (oder den Webhook laufen lassen) — mehr
-passiert auf dem Server nicht. `dist/BUILD.txt` sagt, aus welchem Commit der
-liegende Stand gebaut wurde.
 
 Das Mikrofon braucht einen sicheren Kontext: ohne HTTPS bleibt der
 Aufnahmeknopf tot. In Plesk dafür „Dauerhafte SEO-sichere 301-Umleitung von

@@ -1,7 +1,7 @@
 node_modules/
-# dist/ liegt bewusst im Repo: Plesk deployt per `git pull`, gebaut wird
-# lokal bzw. in der Pipeline. Nach Änderungen an src/ oder index.html also
-# `npm run build` und das Ergebnis mitcommitten.
+# dist/ liegt bewusst im Repo: Plesk deployt per `git pull` und baut selbst
+# nichts. Auf main committet die Pipeline den Build selbst hinterher, auf
+# Feature-Branches bleibt dist/ absichtlich unangetastet (siehe README).
 .DS_Store
 *.local
 .vite/

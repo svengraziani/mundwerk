@@ -2,6 +2,11 @@ name: Build
 
 # Baut dist/ und hängt es als Artefakt an den Lauf. GitHub liefert Artefakte
 # immer als ZIP aus — herunterladen, entpacken, Inhalt per SFTP hochladen.
+#
+# Auf dem Default-Branch macht die Pipeline zusätzlich den Deploy-Schritt: Sie
+# committet das frisch gebaute dist/ zurück auf denselben Branch. Netcup/Plesk
+# zieht per `git pull` und baut selbst nichts — ohne diesen Commit lägen nach
+# einem Pull neue Quellen und ein alter Build nebeneinander.
 
 on:
   push:
@@ -19,11 +24,17 @@ on:
         default: true
 
 permissions:
-  contents: read
+  # Schreibrecht nur wegen des dist-Commits weiter unten. Damit das greift,
+  # muss unter Settings → Actions → General → Workflow permissions
+  # „Read and write permissions“ stehen — sonst ist der Token trotz dieser
+  # Zeile schreibgeschützt und der Push scheitert mit 403.
+  contents: write
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Auf Feature-Branches darf ein neuer Push den alten Lauf abräumen. Auf dem
+  # Default-Branch nicht: dort ist der Lauf der Deploy und wird zu Ende geführt.
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 
 jobs:
   build:
@@ -31,6 +42,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Volle Historie, damit der dist-Commit unten notfalls rebasen kann.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -69,6 +83,50 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 30
+
+      - name: dist/ zurück auf den Branch committen
+        # Nur auf dem Default-Branch — das ist der Branch, den Plesk zieht. Auf
+        # Feature-Branches bleibt dist/ in Ruhe, sonst laufen zwei Builds beim
+        # Merge ineinander und die gehashten Dateinamen kollidieren.
+        if: >-
+          github.event_name == 'push' &&
+          github.ref_name == github.event.repository.default_branch
+        run: |
+          set -euo pipefail
+
+          git add -A dist
+
+          # BUILD.txt ändert sich bei jedem Lauf (Zeitstempel, Laufnummer).
+          # Ein Commit lohnt nur, wenn sich am Build selbst etwas geändert hat.
+          if git diff --cached --quiet -- dist ':!dist/BUILD.txt'; then
+            git reset -q
+            echo "dist/ ist unverändert — kein Commit." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # [skip ci], damit der eigene Push keinen weiteren Lauf auslöst.
+          git commit -q -m "Build: dist/ aus ${GITHUB_SHA:0:7} [skip ci]"
+
+          for versuch in 1 2 3; do
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then
+              echo "dist/ als \`$(git rev-parse --short HEAD)\` auf \`$GITHUB_REF_NAME\` — Plesk kann ziehen." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            # Push abgelehnt: entweder ist der Branch weitergezogen, oder es hakt
+            # an der Leitung. Der Unterschied entscheidet, ob das ein Fehler ist.
+            git fetch -q origin "$GITHUB_REF_NAME"
+            if [ "$(git rev-parse "origin/$GITHUB_REF_NAME")" != "$GITHUB_SHA" ]; then
+              echo "\`$GITHUB_REF_NAME\` ist weitergezogen — der Lauf zum neueren Commit committet den Build. Hier nichts zu tun." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep $((versuch * 5))
+          done
+
+          echo "::error::Push von dist/ nach $GITHUB_REF_NAME fehlgeschlagen. Steht unter Settings → Actions → General „Read and write permissions“? Schützt eine Branch-Regel den Branch?"
+          exit 1
 
       - name: Zusammenfassung
         run: |
