@@ -23,6 +23,18 @@ const rnd = () => {
   return seed / 0x7fffffff
 }
 const noise = () => rnd() * 2 - 1
+/**
+ * Zweiter, unabhängiger Strom fürs Singen.
+ *
+ * Nur damit die älteren Fixtures byte-gleich bleiben: zöge `sing()` aus
+ * demselben LCG, verschöbe sich jede danach erzeugte Datei, und der Diff wäre
+ * voll mit Rauschen, das niemand angefasst hat.
+ */
+let vseed = 987654321
+const vnoise = () => {
+  vseed = (vseed * 1103515245 + 12345) & 0x7fffffff
+  return (vseed / 0x7fffffff) * 2 - 1
+}
 const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12)
 
 function biquad(input, type, freq, q) {
@@ -132,6 +144,49 @@ function whistle(midi, dur, { vibrato = 0.35, breath = 0.012, glideFrom = null, 
   return x
 }
 
+/**
+ * Ein gesungener Vokal, Marke „la“.
+ *
+ * Der Unterschied zum Pfeifen ist nicht die Tonhöhe, sondern die Teiltonreihe:
+ * eine Stimme bringt zwanzig Harmonische mit, deren Pegel drei Formanten
+ * formen. Genau daran scheitert eine Erkennung, die nur auf Sinus getrimmt
+ * ist — deshalb wird hier so und nicht mit `whistle(midi - 24)` synthetisiert.
+ *
+ * @param vowel  Formanten als [Mitte, Bandbreite, Pegel]
+ */
+const VOWELS = {
+  a: [[730, 110, 1], [1090, 130, 0.5], [2440, 190, 0.22]],
+  o: [[570, 90, 1], [840, 110, 0.45], [2410, 190, 0.16]],
+}
+
+function sing(midi, dur, { vibrato = 0.7, breath = 0.008, glideFrom = null, glideSec = 0.25, vowel = 'a', rolloff = 1.15 } = {}) {
+  const n = Math.round(dur * SR)
+  const x = new Float32Array(n)
+  const target = midiToHz(midi)
+  const F = VOWELS[vowel]
+  const shape = (f) => F.reduce((s, [cf, bw, g]) => s + g / (1 + Math.pow((f - cf) / (bw / 2), 2)), 0.015)
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    const t = i / SR
+    const glide = glideFrom ? Math.min(1, t / glideSec) : 1
+    const base = glideFrom ? glideFrom * Math.pow(target / glideFrom, glide) : target
+    // Sängervibrato: gut 5 Hz, deutlich breiter als beim Pfeifen.
+    const f = base * Math.pow(2, (vibrato * 0.5 * Math.sin(2 * Math.PI * 5.2 * t)) / 12)
+    phase += (2 * Math.PI * f) / SR
+    let v = 0
+    let norm = 0
+    for (let k = 1; k * f < 5200; k++) {
+      const a = shape(k * f) / Math.pow(k, rolloff)
+      v += a * Math.sin(k * phase)
+      norm += a
+    }
+    // „l“ vorne, Ausklang hinten — eine Silbe, kein Dauerton.
+    const env = Math.min(1, t / 0.045) * Math.min(1, (dur - t) / 0.07)
+    x[i] = env * (v / Math.max(1e-6, norm) + breath * vnoise())
+  }
+  return x
+}
+
 function kick(dur = 0.35) {
   const n = Math.round(dur * SR)
   const x = new Float32Array(n)
@@ -175,20 +230,26 @@ function hat(dur = 0.10, decay = 0.020) {
 mkdirSync(OUT, { recursive: true })
 const manifest = []
 
-/** Eine Melodie aus Einzeltönen mit Pausen dazwischen. */
-function melodyFixture({ file, label, midis, dur = 0.42, gap = 0.09, opts = {}, post = (x) => x, lead = 0.15 }) {
+/**
+ * Eine Melodie aus Einzeltönen mit Pausen dazwischen.
+ *
+ * `source` landet im Manifest und sagt Test wie Browser, mit welchem
+ * Analyseprofil die Datei gelesen werden will.
+ */
+function melodyFixture({ file, label, midis, dur = 0.42, gap = 0.09, opts = {}, post = (x) => x, lead = 0.15, source = 'whistle' }) {
+  const tone = source === 'voice' ? sing : whistle
   const total = lead * 2 + midis.length * (dur + gap)
   const x = new Float32Array(Math.round(total * SR))
   const notes = []
   let t = lead
   for (const m of midis) {
-    mixInto(x, whistle(m, dur, opts), t)
+    mixInto(x, tone(m, dur, opts), t)
     notes.push({ midi: m, start: +t.toFixed(3), end: +(t + dur).toFixed(3) })
     t += dur + gap
   }
   const y = normalize(post(x))
   const sec = writeWav(file, y)
-  manifest.push({ file, label, mode: 'melody', seconds: +sec, expect: { notes } })
+  manifest.push({ file, label, mode: 'melody', source, seconds: +sec, expect: { notes } })
 }
 
 melodyFixture({
@@ -248,11 +309,65 @@ melodyFixture({
     file: 'whistle-glide.wav',
     label: 'Pfeifen — ein Glissando',
     mode: 'melody',
+    source: 'whistle',
     seconds: +sec,
     // Eine einzige Phrase. Der Grundton der Note ist der *Anfang* des
     // Glissandos — den Rest der Kontur trägt der Pitch Bend, nicht eine
     // zweite Note. Deshalb steht hier from/to statt einer festen Note.
     expect: { notes: 1, from: 79, to: 88 },
+  })
+}
+
+melodyFixture({
+  file: 'sing-lala.wav',
+  label: 'Gesang — la la la',
+  source: 'voice',
+  // A3 bis E4: die Lage, in der die meisten ohne nachzudenken lossingen.
+  midis: [57, 59, 60, 62, 64],
+  dur: 0.5,
+  gap: 0.12,
+})
+
+melodyFixture({
+  file: 'sing-low.wav',
+  label: 'Gesang — tiefe Stimme',
+  source: 'voice',
+  // E2 bis A2. Unter dem Pfeifbereich liegt hier selbst der vierte Teilton.
+  midis: [40, 43, 45],
+  dur: 0.6,
+  gap: 0.14,
+  opts: { vowel: 'o', vibrato: 0.4 },
+})
+
+melodyFixture({
+  file: 'sing-high.wav',
+  label: 'Gesang — hohe Stimme',
+  source: 'voice',
+  // A4 bis E5, mit kräftigem Vibrato.
+  midis: [69, 72, 76],
+  dur: 0.6,
+  gap: 0.12,
+  opts: { vibrato: 0.9 },
+})
+
+// Gesungenes Portamento: wie beim Pfeifen eine Phrase, kein Notentreppchen.
+// Langsamer gezogen als beim Pfeifen, und das ist kein Detail: das
+// Gesangsprofil misst über ein doppelt so langes Fenster, und was sich
+// innerhalb eines Fensters um mehr als einen Ton bewegt, ist für eine
+// Autokorrelation schlicht nicht mehr periodisch.
+{
+  const dur = 1.6
+  const lead = 0.15
+  const x = new Float32Array(Math.round((dur + lead * 2) * SR))
+  mixInto(x, sing(59, dur, { glideFrom: midiToHz(52), vibrato: 0.3, glideSec: 0.9 }), lead)
+  const sec = writeWav('sing-glide.wav', normalize(x))
+  manifest.push({
+    file: 'sing-glide.wav',
+    label: 'Gesang — ein Portamento',
+    mode: 'melody',
+    source: 'voice',
+    seconds: +sec,
+    expect: { notes: 1, from: 52, to: 59 },
   })
 }
 
@@ -262,7 +377,7 @@ melodyFixture({
   mixInto(x, whistle(84, 1.2), 0.3)
   normalize(x, 0.002)
   const sec = writeWav('error-quiet.wav', x)
-  manifest.push({ file: 'error-quiet.wav', label: 'Fehlerfall — zu leise', mode: 'melody', seconds: +sec, expect: { fails: true } })
+  manifest.push({ file: 'error-quiet.wav', label: 'Fehlerfall — zu leise', mode: 'melody', source: 'whistle', seconds: +sec, expect: { fails: true } })
 }
 
 // Nur Rauschen: keine Tonhöhe, aber auch kein Absturz.
@@ -272,7 +387,7 @@ melodyFixture({
   for (let i = 0; i < n; i++) raw[i] = noise()
   const x = normalize(biquad(raw, 'lowpass', 3000, 0.7), 0.5)
   const sec = writeWav('error-noise.wav', x)
-  manifest.push({ file: 'error-noise.wav', label: 'Fehlerfall — nur Rauschen', mode: 'melody', seconds: +sec, expect: { fails: true } })
+  manifest.push({ file: 'error-noise.wav', label: 'Fehlerfall — nur Rauschen', mode: 'melody', source: 'whistle', seconds: +sec, expect: { fails: true } })
 }
 
 /** Ein Beat aus Kick / Snare / Hat. */

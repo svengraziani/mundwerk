@@ -13,13 +13,21 @@
 
 <header>
   <div class="eyebrow">Prototyp · alles aus dem Mund</div>
-  <h1>Pfeif es.<br>Beatbox es. <em>Nimm's mit.</em></h1>
-  <p class="lede">Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Beides geht als MIDI raus — klassisch oder als MPE, mit Pitch Bend, Anschlagstärke und Druck. Und wenn du die nackte Kurve willst: Tonhöhe und Lautstärke als CSV.</p>
+  <h1>Pfeif es. Sing es.<br>Beatbox es. <em>Nimm's mit.</em></h1>
+  <p class="lede">Pfeifen wird ein Blasinstrument, Gesungenes auch, Mundbeats werden Drums. Alles geht als MIDI raus — klassisch oder als MPE, mit Pitch Bend, Anschlagstärke und Druck. Und wenn du die nackte Kurve willst: Tonhöhe und Lautstärke als CSV.</p>
 </header>
 
 <div class="modes" role="tablist">
-  <button class="mode on" data-m="melody" role="tab" aria-selected="true">Melodie<span class="tag">PFEIFEN</span></button>
+  <button class="mode on" data-m="melody" role="tab" aria-selected="true">Melodie<span class="tag" id="srcTag">PFEIFEN</span></button>
   <button class="mode" data-m="beat" role="tab" aria-selected="false">Beat<span class="tag">MUND</span></button>
+</div>
+
+<div class="src-row" id="srcRow">
+  <div class="seg" role="tablist" aria-label="Was kommt ins Mikrofon">
+    <button class="segb on" data-src="whistle" role="tab" aria-selected="true">Pfeifen</button>
+    <button class="segb" data-src="voice" role="tab" aria-selected="false">Gesang</button>
+  </div>
+  <div class="chint">Zwei Frequenzbereiche, zwei Fenstergrößen. Umschalten geht auch nach der Aufnahme — sie wird dann neu ausgewertet.</div>
 </div>
 
 <div class="trace">
@@ -32,7 +40,7 @@
   <button class="rec" id="rec" aria-label="Aufnahme starten"><span class="rec-icon"></span></button>
   <div class="rec-label">
     <b id="recTitle">Aufnehmen</b>
-    <span id="recHint">Pfeif eine kurze Melodie, bis 20 Sekunden.</span>
+    <span id="recHint">Pfeif eine Melodie, bis eine Minute.</span>
   </div>
 </div>
 
@@ -57,7 +65,7 @@
     <div class="ctrl">
       <div class="ctop"><label for="oct">Lage</label><span class="cval" id="octV">−12 Halbtöne</span></div>
       <input type="range" id="oct" min="-24" max="12" step="1" value="-12">
-      <div class="chint">Pfeifen liegt hoch. Runterziehen bringt die Melodie dahin, wo das Instrument natürlich klingt.</div>
+      <div class="chint" id="octHint">Pfeifen liegt hoch. Runterziehen bringt die Melodie dahin, wo das Instrument natürlich klingt.</div>
     </div>
     <div class="ctrl">
       <div class="ctop"><label for="vib">Vibrato</label><span class="cval" id="vibV">100 %</span></div>
@@ -131,7 +139,7 @@
       <div class="midi-item"><span class="midi-key">ZONE</span><div><b>Untere Zone, Kanal 1 als Master</b> <span>— die Anzahl der Stimmkanäle steht als MPE Configuration Message in der Datei. Liegt ein Beat dabei, wird die Zone kleiner, damit Kanal 10 für die Drums frei bleibt.</span></div></div>
       <div class="midi-item"><span class="midi-key">1:1</span><div><b>Eine Note, ein Kanal</b> <span>— reihum. Damit gilt der Druck genau dieser Stimme statt allem, was gerade klingt, und der Bend biegt nur sie.</span></div></div>
       <div class="midi-item"><span class="midi-key">BEND</span><div><b>Pitch Bend pro Stimme</b> <span>— der Umfang steht auf jedem Stimmkanal, nicht nur auf einem. Bei ±48 wird aus einer durchgezogenen Phrase eine einzige Note mit Kurve.</span></div></div>
-      <div class="midi-item"><span class="midi-key">CC74</span><div><b>Y-Achse mit echter Messung</b> <span>— wie hoch im Umfang dieser Aufnahme gerade gepfiffen wird. Alle 40 ms, zusammen mit dem Druck.</span></div></div>
+      <div class="midi-item"><span class="midi-key">CC74</span><div><b>Y-Achse mit echter Messung</b> <span>— wie hoch im Umfang dieser Aufnahme gerade gepfiffen oder gesungen wird. Alle 40 ms, zusammen mit dem Druck.</span></div></div>
     </div>
 
     <div class="ctrl" style="margin-bottom:16px">

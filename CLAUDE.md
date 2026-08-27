@@ -1,12 +1,13 @@
 # Mundwerk
 
-Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Aufnehmen im Browser,
-anhören, als MIDI oder WAV rausgeben. Alles lokal, nichts verlässt das Gerät.
+Pfeifen wird ein Blasinstrument, Gesungenes auch, Mundbeats werden Drums.
+Aufnehmen im Browser (bis eine Minute), anhören, als MIDI oder WAV rausgeben.
+Alles lokal, nichts verlässt das Gerät.
 
 ## Aufbau
 
 ```
-src/audio/pitch.js       NSDF-Erkennung, medianFix/octaveFix, shapedCurve, segmentNotes
+src/audio/pitch.js       PROFILES, NSDF-Erkennung, Aufräumstufen, shapedCurve, segmentNotes
 src/audio/onset.js       Bandfilter, Hüllkurven, detectHits, estimateBPM, gridded
 src/audio/synth.js       renderMelody, renderBeat, renderMix, toWav
 src/audio/midi.js        buildMidi, buildMpe + SMF-Hilfsfunktionen
@@ -36,8 +37,40 @@ neue Note an, wenn die Tonhöhe weiter vom Grundton wegläuft als der Bend-Umfan
 abbilden kann. Bei ±12 Halbtönen wird aus einer durchgezogenen Phrase über eine
 Oktave *eine* Note mit Bend-Kurve. Das ist Absicht.
 
-**Nur der Pfeifbereich.** `FMIN = 380`, `FMAX = 4200`. Summen und Sprechen
-liegen darunter und werden bewusst nicht erkannt.
+**Zwei Profile, kein gemeinsamer Bereich.** `PROFILES.whistle` sucht zwischen
+380 und 4200 Hz, `PROFILES.voice` zwischen 75 und 1200 Hz. Ein Bereich für
+beides wäre für beide schlechter: Der Pfeifbereich fängt tief keine Stimme, und
+ein bis 4200 Hz offenes Gesangsprofil landet dauernd auf einem Teilton. Welches
+Profil gilt, entscheidet der Nutzer über den Schalter *Pfeifen / Gesang* — die
+Rohaufnahme bleibt liegen, Umschalten wertet sie neu aus statt sie zu
+verwerfen. Ausgelegt ist das Gesangsprofil auf gehaltene Vokale — Sprechen
+liefert zwar Werte, aber bei ständig wechselnder Tonhöhe fällt das meiste
+davon durch `dropRuns`, und was bleibt, sind keine Noten, die jemand haben
+will.
+
+**Das Gesangsprofil rechnet dezimiert.** Ein Suchbereich, der bis 75 Hz
+runtergeht, kostet pro Frame rund das Neunfache — bei einer Minute Aufnahme
+wären das gut zwanzig Sekunden Analyse (gemessen: 21 s). `decimate()` bringt das Signal vorher auf
+gut 11 kHz, danach ist das Gesangsprofil sogar billiger als das Pfeifprofil
+(gemessen: 1,5 s gegen 2,4 s für eine Minute). Der Frameabstand bleibt trotzdem
+`HOP` Samples der **Quelle**, damit `frameRate` und alles dahinter — Zeichnung,
+Kurven-Export, Notenzeiten — unverändert weiterrechnen.
+
+**Das Analysefenster ist beim Gesang doppelt so lang** (46 statt 23 ms), weil
+tiefe Töne lange Perioden haben. Der Preis: Was sich innerhalb eines Fensters
+um mehr als einen Ton bewegt, ist für eine Autokorrelation nicht mehr
+periodisch. Ein sehr schnell gezogenes Portamento verschmiert deshalb — siehe
+`sing-glide.wav`, das bewusst langsamer gezogen ist als sein Pfeif-Gegenstück.
+
+**Teiltöne werden erst korrigiert, dann verworfen.** An Ein- und
+Ausschwingern einer Stimme fehlt der Grundton, und die Erkennung hängt einige
+Frames lang an einem Teilton. `octaveFix` holt zurück, was ein klares Vielfaches
+ist (Oktave, Quinte darüber) — für alles andere gibt es `dropOutliers`, das
+solche Frames wegwirft statt zu raten. Ohne die zweite Stufe zieht `bridgeGaps`
+aus einem einzigen falschen Frame eine Rampe über zweieinhalb Oktaven, und der
+Grundton der Note verschiebt sich. Beide laufen in zwei Durchgängen: am Anfang
+einer solchen Strecke besteht die Nachbarschaft selbst noch aus falschen
+Werten.
 
 **Im Zweifel geschlossen.** Ob eine Hi-Hat offen ist, entscheidet die
 Abklingdauer im hohen Band. Steht der nächste Schlag so dicht, dass die Fahne
@@ -67,10 +100,10 @@ auf ±2 stehenbleiben. Fünfzehnmal vier Bytes sind der Preis dafür, ihn zu
 umgehen.
 
 **CC74 im MPE-Export ist gemessen, nicht erfunden.** Die Y-Achse trägt, wie hoch
-im Umfang *dieser Aufnahme* gerade gepfiffen wird (`centsSpan`/`normPos` in
-`pitch.js`). Bezugsgröße ist bewusst die Aufnahme und nicht `FMIN..FMAX` — über
-den festen Pfeifbereich normiert bliebe von einer Terz ein Zwanzigstel des Wegs
-übrig. Dieselbe Größe steht im Kurven-Export in der Spalte `norm`. Wer eine
+im Umfang *dieser Aufnahme* gerade gepfiffen oder gesungen wird
+(`centsSpan`/`normPos` in `pitch.js`). Bezugsgröße ist bewusst die Aufnahme und
+nicht der Bereich des Profils — über die vier Oktaven des Pfeifprofils normiert
+bliebe von einer Terz ein Zwanzigstel des Wegs übrig. Dieselbe Größe steht im Kurven-Export in der Spalte `norm`. Wer eine
 dritte Dimension will, die niemand gepfiffen hat, zeichnet sie in der DAW.
 
 **Im Kurven-Export sind unstimmhafte Frames Nullen, keine Lücken.** Eine
@@ -118,8 +151,9 @@ spielt bei stummgeschaltetem Klingelton weiter, WebAudio nicht. Das ist keine
 Sache des Codes; bleibt es nach allem oben still, gehört der Schalter am Rand
 des Geräts geprüft.
 
-**ScriptProcessorNode statt AudioWorklet.** Veraltet, aber überall gleich und für
-20 Sekunden Mono völlig ausreichend. Kein Grund zum Umbau.
+**ScriptProcessorNode statt AudioWorklet.** Veraltet, aber überall gleich und
+für eine Minute Mono völlig ausreichend — das sind knapp 12 MB im Puffer und
+gut zwei Sekunden Analyse. Kein Grund zum Umbau.
 
 **Kein Framework, keine Laufzeit-Abhängigkeit.** Nur Vite als Build. Bitte so lassen.
 
@@ -139,6 +173,14 @@ Aufnahmeknopf — nichts reinpfeifen müssen.
 
 Ändert eine Änderung absichtlich das Analyseergebnis, gehört die neue Erwartung
 in `fixtures/manifest.json` bzw. in den Test — nicht die Toleranz hochgedreht.
+
+Jede Melodie-Fixture trägt im Manifest ein `source` (`whistle` oder `voice`).
+Test und Browser lesen es und analysieren mit dem passenden Profil; wer eine
+neue Gesangsfixture baut, nimmt `sing()` in `scripts/make-fixtures.mjs` und
+nicht `whistle()` eine Oktave tiefer — ohne Teiltonreihe testet die Fixture
+nichts von dem, woran das Gesangsprofil scheitern kann. `sing()` zieht sein
+Rauschen aus einem eigenen LCG, damit die älteren Fixtures byte-gleich
+bleiben.
 
 ## Wie ein Schlag eingeordnet wird
 
