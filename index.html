@@ -44,6 +44,26 @@
   </div>
 </div>
 
+<div class="gate-card">
+  <div class="gate-head">
+    <button class="btn small" id="calBtn">Raum messen</button>
+    <button class="btn small hidden" id="calOff">Sperre aus</button>
+    <span class="gate-read" id="gateRead">ungemessen</span>
+  </div>
+  <div class="meter" id="meter" role="img" aria-label="Pegel, Rauschboden und Sperre">
+    <div class="mfill" id="mfill"></div>
+    <div class="mdead" id="mdead"></div>
+    <div class="mmark mfloor hidden" id="mfloor"></div>
+    <div class="mmark mgate" id="mgate"></div>
+  </div>
+  <div class="mscale"><span>−70</span><span>Rauschboden · Sperre</span><span>0 dB</span></div>
+  <div class="ctrl">
+    <div class="ctop"><label for="gateDb">Rauschsperre</label><span class="cval" id="gateDbV">+8 dB</span></div>
+    <input type="range" id="gateDb" min="0" max="24" step="1" value="8" disabled>
+    <div class="chint">Ein, zwei Sekunden still sein und „Raum messen“ tippen — danach gilt alles unter dem Boden plus diesem Abstand als Stille. Hilft gegen Lüfter, Straße und Rauschen <em>zwischen</em> den Tönen. Was während des Tons lauter ist als der Ton, trennt kein Pegelgate.</div>
+  </div>
+</div>
+
 <div class="source-row">
   <button class="btn small" id="loadBtn">Datei laden</button>
   <select class="btn small" id="fixture" aria-label="Testaufnahme">

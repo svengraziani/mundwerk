@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readWav, manifest } from './wav.js'
-import { analyseBeat, detectHits, estimateBPM, gridded } from '../src/audio/onset.js'
+import { analyseBeat, detectHits, estimateBPM, gridded, noiseFloorBeat } from '../src/audio/onset.js'
 
 const TOL = 0.045 // s — so nah muss ein Treffer am erwarteten Schlag liegen
 const family = (t) => (t === 'openhat' || t === 'hat' ? 'hihat' : t)
@@ -46,10 +46,50 @@ function fakeBeat(events, seconds = 2) {
   for (let i = 0; i < n; i++) pk = Math.max(pk, tot[i])
   for (let b = 0; b < 3; b++) for (let i = 0; i < n; i++) env[b][i] /= pk
   for (let i = 0; i < n; i++) tot[i] /= pk
-  return { buf: new Float32Array(Math.round(seconds * sr)), sr, env, tot, frameH, hits: [], bpm: 0 }
+  return { buf: new Float32Array(Math.round(seconds * sr)), sr, env, tot, frameH, peak: pk, hits: [], bpm: 0 }
 }
 
 const at = (hits, t) => hits.find((h) => Math.abs(h.t - t) <= TOL)
+
+/* ══════════════ Rauschsperre ══════════════ */
+/** Raumrauschen mit gelegentlichem Klacken — Tastatur, Straße, Stuhl. */
+function roomNoise(n, sr, amp) {
+  let seed = 11
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return (seed / 0x7fffffff) * 2 - 1
+  }
+  const out = new Float32Array(n)
+  let lp = 0
+  let ph = 0
+  for (let i = 0; i < n; i++) {
+    lp = lp * 0.995 + rnd() * 0.005
+    ph += (2 * Math.PI * 50) / sr
+    out[i] = (lp * 14 + Math.sin(ph) * 0.25 + rnd() * 0.1 + (i % 9000 < 400 ? rnd() * 0.5 : 0)) * amp
+  }
+  return out
+}
+
+test('die Rauschsperre entkoppelt Empfindlichkeit vom Raum', () => {
+  const { samples, sampleRate } = readWav('beat-simple.wav')
+  const want = manifest().find((x) => x.file === 'beat-simple.wav').expect.hits.length
+  const noise = roomNoise(samples.length, sampleRate, 0.06)
+  const beat = analyseBeat(Float32Array.from(samples, (v, i) => v * 0.75 + noise[i]), sampleRate)
+  const floor = noiseFloorBeat(roomNoise(Math.round(1.5 * sampleRate), sampleRate, 0.06), sampleRate)
+  assert.ok(floor > 0, 'ein Raum hat einen Boden')
+
+  // Hoch aufgedreht, damit auch leise Hi-Hats mitkommen: ohne Sperre kommt
+  // dann der Raum mit, mit Sperre nicht. Genau dafür ist sie da.
+  const loose = detectHits(beat, 0.7).hits.length
+  const gated = detectHits(beat, 0.7, floor * 5).hits.length
+  assert.ok(loose > want * 1.3, `ohne Sperre sollten es deutlich zu viele sein, sind aber ${loose}`)
+  assert.equal(gated, want, `mit Sperre sollten es ${want} sein`)
+
+  // Und sie darf nicht einfach alles verschlucken: eine Sperre über dem
+  // lautesten Schlag wäre kein Gewinn, sondern ein Aus-Schalter.
+  assert.equal(detectHits(beat, 0.7, beat.peak * 2).hits.length, 0)
+  assert.equal(detectHits(beat, 0.7, 0).hits.length, loose, 'ohne Wert bleibt alles wie bisher')
+})
 
 /* ══════════════ Fixtures ══════════════ */
 for (const f of beats) {

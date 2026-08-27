@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { readWav, manifest } from './wav.js'
 import {
   analyseMelody, shapedCurve, segmentNotes, detect, decimate, decimFactor,
-  medianFix, octaveFix, bridgeGaps, dropRuns, dropOutliers, HOP, PROFILES,
+  medianFix, octaveFix, bridgeGaps, dropRuns, dropOutliers, noiseFloor,
+  HOP, PROFILES, RMS_GATE,
 } from '../src/audio/pitch.js'
 
 const SHAPE_NEUTRAL = { semis: 0, vib: 1, quant: 0 }
@@ -117,6 +118,87 @@ test('decimate rechnet die Rate herunter und hält die Spiegelfrequenzen drauße
 
   assert.equal(decimFactor('whistle', sr), 1, 'das Pfeifprofil rechnet mit der Quellrate')
   assert.equal(decimate(low, sr, 1).buf, low, 'Faktor 1 reicht den Puffer unverändert durch')
+})
+
+/* ── Rauschsperre ───────────────────────────────────────── */
+/** Gleichverteiltes Rauschen mit bekanntem Effektivwert (Amplitude / √3). */
+function hiss(n, amp) {
+  let seed = 5
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    out[i] = ((seed / 0x7fffffff) * 2 - 1) * amp
+  }
+  return out
+}
+
+test('detect schweigt unter der übergebenen Sperre', () => {
+  const sr = 44100
+  const buf = new Float32Array(4096)
+  for (let i = 0; i < buf.length; i++) buf[i] = Math.sin((2 * Math.PI * 880 * i) / sr) * 0.02
+  const rms = 0.02 / Math.SQRT2 // Effektivwert eines Sinus
+  assert.ok(detect(buf, 0, 1024, sr, 'whistle', rms * 0.5).hz > 0, 'über der Sperre gehört erkannt')
+  assert.equal(detect(buf, 0, 1024, sr, 'whistle', rms * 2).hz, 0, 'darunter nicht')
+  assert.equal(analyseMelody(buf, sr, 'whistle', rms * 2), null, 'und dann bleibt nichts übrig')
+})
+
+test('noiseFloor misst den Median und nicht den Krach dazwischen', () => {
+  const sr = 44100
+  const buf = hiss(sr, 0.02)
+  const floor = noiseFloor(buf, sr, 'whistle')
+  const want = 0.02 / Math.sqrt(3)
+  assert.ok(Math.abs(floor - want) < want * 0.1, `${floor.toFixed(4)} statt ${want.toFixed(4)}`)
+
+  // Eine zugeschlagene Tür in der Mitte der Messung: der Median hält.
+  const slam = Float32Array.from(buf)
+  for (let i = sr * 0.4; i < sr * 0.55; i++) slam[i] = buf[i] * 30
+  assert.ok(Math.abs(noiseFloor(slam, sr, 'whistle') - floor) < want * 0.1, 'ein Ausreißer darf den Boden nicht heben')
+
+  // Durch dieselbe Kette gemessen wie analysiert: Breitbandrauschen fällt im
+  // Gesangsprofil hinter dem Tiefpass leiser aus. Ein Boden, der das nicht
+  // mitmacht, würde hinterher leisen Gesang wegsperren.
+  assert.ok(noiseFloor(buf, sr, 'voice') < floor * 0.8, 'das Gesangsprofil misst hinter dem Tiefpass')
+
+  assert.equal(noiseFloor(new Float32Array(64), sr, 'whistle'), 0, 'zu kurz für einen einzigen Frame')
+})
+
+/**
+ * Ein Raum, wie er klingt: überwiegend tieffrequentes Brummen (Lüftung,
+ * Straße), das Netzbrummen darüber und etwas Zischen. Weißes Rauschen wäre
+ * der leichtere Fall — die eingebaute Sperre kommt damit noch zurecht.
+ */
+function roomNoise(n, sr, amp) {
+  let seed = 11
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return (seed / 0x7fffffff) * 2 - 1
+  }
+  const out = new Float32Array(n)
+  let lp = 0
+  let ph = 0
+  for (let i = 0; i < n; i++) {
+    lp = lp * 0.995 + rnd() * 0.005
+    ph += (2 * Math.PI * 50) / sr
+    out[i] = (lp * 14 + Math.sin(ph) * 0.25 + rnd() * 0.1) * amp
+  }
+  return out
+}
+
+test('eine gemessene Sperre räumt auf, wo die eingebaute zu tief steht', () => {
+  const { samples, sampleRate } = readWav('whistle-clean.wav')
+  const noise = roomNoise(samples.length, sampleRate, 0.03)
+  const mixed = Float32Array.from(samples, (v, i) => v * 0.8 + noise[i])
+  // Die Messung: derselbe Raum, nur ohne dass jemand pfeift.
+  const floor = noiseFloor(roomNoise(Math.round(1.5 * sampleRate), sampleRate, 0.03), sampleRate, 'whistle')
+  const want = manifest().find((x) => x.file === 'whistle-clean.wav').expect.notes.map((n) => n.midi)
+
+  const notes = (gate) => {
+    const m = analyseMelody(mixed, sampleRate, 'whistle', gate)
+    const shaped = shapedCurve(m, SHAPE_NEUTRAL)
+    return segmentNotes(m, shaped, 12).map((n) => n.midi)
+  }
+  assert.notDeepEqual(notes(RMS_GATE), want, 'ohne Messung zieht das Rauschen den Grundton weg')
+  assert.deepEqual(notes(floor * 2), want, 'mit Boden + 6 dB stimmen die Noten wieder')
 })
 
 /* ── Korrekturstufen ────────────────────────────────────── */

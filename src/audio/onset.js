@@ -71,11 +71,10 @@ export const BANDS = [
 ]
 
 /**
- * Bänder filtern und Hüllkurven bilden.
- * @returns {{buf, sr, env: Float32Array[], tot: Float32Array, frameH: number,
- *            hits: Array, bpm: number}|null}  null, wenn nichts zu hören war.
+ * Bänder filtern und Hüllkurven im 5-ms-Raster bilden. Ohne Normierung.
+ * @returns {{env: Float32Array[], tot: Float32Array, frameH: number}}
  */
-export function analyseBeat(buf, sr) {
+function envelopes(buf, sr) {
   const bands = BANDS.map((b) => filterBand(buf, sr, b.type, b.freq, b.q))
   const H = Math.round(sr * 0.005)
   const n = Math.floor(buf.length / H)
@@ -94,13 +93,45 @@ export function analyseBeat(buf, sr) {
 
   const tot = new Float32Array(n)
   for (let i = 0; i < n; i++) tot[i] = env[0][i] + env[1][i] + env[2][i]
+  return { env, tot, frameH: H }
+}
+
+/**
+ * Rauschboden im Maß dieser Analyse: der Median der Summenhüllkurve.
+ *
+ * Das Gegenstück zu `noiseFloor` in pitch.js, aber in der Einheit, in der
+ * `detectHits` misst — die Summe der drei Bandhüllkurven ist nicht dieselbe
+ * Zahl wie eine Breitband-Lautstärke. Ein Rauschboden, der in der falschen
+ * Einheit gemessen wurde, sperrt entweder alles oder nichts.
+ */
+export function noiseFloorBeat(buf, sr) {
+  const { tot } = envelopes(buf, sr)
+  if (!tot.length) return 0
+  const v = Float64Array.from(tot)
+  v.sort()
+  return v[v.length >> 1]
+}
+
+/**
+ * Bänder filtern und Hüllkurven bilden.
+ *
+ * `peak` ist der Wert, auf den normiert wurde: alles in `env` und `tot` ist
+ * danach 0..1, und wer absolut messen will — die Rauschsperre etwa — kommt
+ * damit wieder zurück.
+ *
+ * @returns {{buf, sr, env: Float32Array[], tot: Float32Array, frameH: number,
+ *            peak: number, hits: Array, bpm: number}|null}  null, wenn nichts zu hören war.
+ */
+export function analyseBeat(buf, sr) {
+  const { env, tot, frameH } = envelopes(buf, sr)
+  const n = tot.length
   let pk = 0
   for (let i = 0; i < n; i++) if (tot[i] > pk) pk = tot[i]
   if (pk <= 0) return null
   for (let b = 0; b < 3; b++) for (let i = 0; i < n; i++) env[b][i] /= pk
   for (let i = 0; i < n; i++) tot[i] /= pk
 
-  return { buf, sr, env, tot, frameH: H, hits: [], bpm: 0 }
+  return { buf, sr, env, tot, frameH, peak: pk, hits: [], bpm: 0 }
 }
 
 /** Frames vor dem Einsatz, aus denen die Grundlinie geschätzt wird (15 ms). */
@@ -121,13 +152,17 @@ const OPEN_SEC = 0.13
  *
  * @param {object} beat   Ergebnis von analyseBeat
  * @param {number} sens   0..1, höher findet leisere Schläge
+ * @param {number} gate   absolute Rauschsperre; siehe `noiseFloorBeat`
  * @returns {{hits: Array<{t,type,vel}>, bpm: number}}
  */
-export function detectHits(beat, sens = 0.5) {
-  const { tot, frameH, sr } = beat
+export function detectHits(beat, sens = 0.5, gate = 0) {
+  const { tot, frameH, sr, peak } = beat
   const n = tot.length
   const thr = 0.3 - sens * 0.26 // 0.30 … 0.04
   const refract = Math.round(0.055 / (frameH / sr))
+  // Die Sperre ist absolut gemessen, `tot` ist auf den lautesten Schlag
+  // normiert — also einmal zurückrechnen statt in zwei Einheiten vergleichen.
+  const gateRel = peak > 0 ? gate / peak : 0
 
   const flux = new Float32Array(n)
   for (let i = 1; i < n; i++) flux[i] = Math.max(0, tot[i] - tot[i - 1])
@@ -139,6 +174,7 @@ export function detectHits(beat, sens = 0.5) {
     if (flux[i] < thr * 0.5) continue
     if (!(flux[i] >= flux[i - 1] && flux[i] > flux[i + 1])) continue
     if (tot[i] < thr * 0.55) continue
+    if (tot[i] < gateRel) continue
     if (i - lastI < refract) continue
     onsets.push(i)
     lastI = i

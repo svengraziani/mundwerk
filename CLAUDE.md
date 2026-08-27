@@ -7,8 +7,8 @@ Alles lokal, nichts verlässt das Gerät.
 ## Aufbau
 
 ```
-src/audio/pitch.js       PROFILES, NSDF-Erkennung, Aufräumstufen, shapedCurve, segmentNotes
-src/audio/onset.js       Bandfilter, Hüllkurven, detectHits, estimateBPM, gridded
+src/audio/pitch.js       PROFILES, NSDF-Erkennung, Aufräumstufen, noiseFloor, shapedCurve, segmentNotes
+src/audio/onset.js       Bandfilter, Hüllkurven, detectHits, noiseFloorBeat, estimateBPM, gridded
 src/audio/synth.js       renderMelody, renderBeat, renderMix, toWav
 src/audio/midi.js        buildMidi, buildMpe + SMF-Hilfsfunktionen
 src/audio/curve.js       melodyCurve, beatCurve, hitTable, toCsv, toJson
@@ -97,8 +97,34 @@ Abklingdauer im hohen Band. Steht der nächste Schlag so dicht, dass die Fahne
 gar nicht zu beobachten ist, gilt sie als geschlossen. Lieber eine offene
 Hi-Hat verpassen als bei jedem schnellen Muster falsche `openhat` liefern.
 
+**Der Rauschboden wird gemessen, nicht geraten — und zwar dreimal.** `detect`
+hatte immer schon eine Sperre (`RMS_GATE`, rund −44 dBFS), die aber nichts vom
+Raum weiß. Über „Raum messen“ nimmt die App anderthalb Sekunden Stille auf und
+bildet daraus den **Median** der Frame-Lautstärken — Median, damit eine
+zugeschlagene Tür während der Messung den Wert nicht hochzieht.
+
+Dreimal, weil drei Auswertungen in drei verschiedenen Einheiten messen: das
+Pfeifprofil mit der Quellrate, das Gesangsprofil hinter seinem Tiefpass, die
+Beat-Analyse in der Summe ihrer drei Bandhüllkurven. Eine Zahl in die andere
+umzurechnen wäre geraten, deshalb bleibt der Messschnipsel liegen (`room.buf`,
+anderthalb Sekunden Mono) und jede Auswertung bekommt ihren eigenen Boden. Beim
+Umschalten springt die angezeigte Zahl deshalb — das sind verschiedene
+Messungen desselben Raums, kein Anzeigefehler.
+
+**Wogegen die Sperre hilft und wogegen nicht.** Gegen Rauschen *zwischen* den
+Tönen: gemessen zieht ein Raum bei −40 dB den Grundton der ersten Note um einen
+Halbton weg, mit Boden + 6 dB stimmt sie wieder. Vor allem aber entkoppelt sie
+die Empfindlichkeit beim Beat vom Raum — bei 70 % findet die Erkennung in einem
+Zimmer mit Lüftung 23 statt 16 Schlägen, mit Sperre wieder genau 16. Was
+*während* eines Tons lauter ist als der Ton, trennt kein Pegelgate; ab etwa
+−26 dB Raumpegel liefert das Gesangsprofil Teiltonfehler, die eine Schwelle
+nicht adressieren kann. Der Hinweistext im Regler sagt das auch so.
+
 **Kein Persistenzbedarf.** Aufnahmen sind flüchtig, es gibt keinen Speicher, und
 es braucht auch keinen Ersatz für localStorage. Neu laden heißt neu anfangen.
+Das gilt auch für den gemessenen Raum: Er hängt an der Verstärkung dieses
+Mikrofons, und die ist nach einem Gerätewechsel eine andere. Lieber neu messen
+als eine alte Zahl weiterschleppen.
 
 **Der Bend-Umfang ist ein Regler für beide MIDI-Formate.** Er entscheidet nicht
 nur, was in RPN 0 landet, sondern auch, wann `segmentNotes` eine neue Note

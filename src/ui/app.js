@@ -9,9 +9,9 @@
 import './style.css'
 import {
   analyseMelody, shapedCurve, segmentNotes, detect, decimate, decimFactor,
-  noteName, profileOf, DEFAULT_PROFILE,
+  noteName, noiseFloor, profileOf, DEFAULT_PROFILE, RMS_GATE,
 } from '../audio/pitch.js'
-import { analyseBeat, detectHits, gridded } from '../audio/onset.js'
+import { analyseBeat, detectHits, gridded, noiseFloorBeat } from '../audio/onset.js'
 import { renderMix, toWav } from '../audio/synth.js'
 import { buildMidi, buildMpe, MPE_BEND_RANGE } from '../audio/midi.js'
 import { melodyCurve, beatCurve, hitTable, toCsv, toJson } from '../audio/curve.js'
@@ -63,6 +63,18 @@ let timer = null
 let playing = null
 let mode = 'melody'
 let source = DEFAULT_PROFILE
+let micUse = null // null | 'rec' | 'cal'
+
+/**
+ * Der gemessene Raum.
+ *
+ * `buf` bleibt liegen, weil der Rauschboden je Auswertung anders ausfällt: Das
+ * Gesangsprofil misst hinter dem Tiefpass, die Beat-Analyse in der Einheit
+ * ihrer Bandhüllkurven. Beim Umschalten wird deshalb neu gerechnet und nicht
+ * eine Zahl umgedeutet. 1,5 Sekunden Mono sind das nicht wert, aufzuheben —
+ * die Böden schon.
+ */
+let room = null // { buf, sr, floor: { whistle, voice, beat } }
 
 const S = { melody: null, beat: null }
 let renderCache = { melody: null, beat: null, both: null }
@@ -128,6 +140,34 @@ const melodyShape = () => ({
   quant: +$('quant').value / 100,
 })
 const bendRange = () => +$('bendRange').value
+
+/* ══════════════ RAUSCHSPERRE ══════════════ */
+/** Unteres Ende der Pegelanzeige. Darunter ist ohnehin nichts zu entscheiden. */
+const METER_FLOOR = -70
+
+/** Abstand der Sperre über dem gemessenen Boden, als Faktor. */
+const gateHeadroom = () => Math.pow(10, +$('gateDb').value / 20)
+
+/**
+ * Die Schwelle, unter der ein Frame als still gilt.
+ *
+ * Ohne Messung die eingebaute Vorgabe — die kennt den Raum nicht, ist aber
+ * besser als gar keine. Nach unten begrenzt: In einem sehr stillen Zimmer
+ * misst das Mikrofon fast nichts, und eine Sperre bei −90 dB wäre keine.
+ */
+function gateFor(which) {
+  if (!room) return which === 'beat' ? 0 : RMS_GATE
+  return Math.max(1e-4, room.floor[which] * gateHeadroom())
+}
+const melodyGate = () => gateFor(source)
+const beatGate = () => gateFor('beat')
+const dbOf = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity)
+/** dBFS mit typografischem Minus. Unter der Skala steht „unter −70". */
+function showDb(x) {
+  const v = dbOf(x)
+  if (!(v > METER_FLOOR)) return 'unter −70 dB'
+  return (v < 0 ? '−' : '') + Math.abs(Math.round(v)) + ' dB'
+}
 const curveRate = () => +$('curveRate').value
 const gridAmount = () => +$('dgrid').value / 100
 const griddedHits = () => gridded(S.beat, gridAmount())
@@ -143,7 +183,7 @@ function recomputeMelody() {
 function recomputeBeat() {
   const d = S.beat
   if (!d) return
-  const { hits, bpm } = detectHits(d, +$('dsens').value / 100)
+  const { hits, bpm } = detectHits(d, +$('dsens').value / 100, beatGate())
   d.hits = hits
   d.bpm = bpm
   $('bpmOut').textContent = bpm ? '≈ ' + bpm + ' BPM' : 'Tempo unklar'
@@ -164,6 +204,7 @@ function setMode(m) {
     x.setAttribute('aria-selected', on ? 'true' : 'false')
   })
   $('srcRow').classList.toggle('hidden', mode !== 'melody')
+  showGate()
   $('recHint').textContent =
     mode === 'melody'
       ? SOURCES[source].hint
@@ -195,6 +236,7 @@ function setSource(s, keep) {
   })
   $('srcTag').textContent = SOURCES[source].tag
   $('octHint').textContent = SOURCES[source].lageHint
+  showGate()
   if (mode === 'melody') $('recHint').textContent = SOURCES[source].hint
 
   // Die Lage wie den Bend-Umfang behandeln: nur nachziehen, solange sie noch
@@ -216,16 +258,16 @@ function setSource(s, keep) {
  * paar Sekunden, und ohne den Umweg käme der Hinweis erst danach auf den
  * Schirm — also nie.
  */
-function reanalyse() {
+function reanalyse(force) {
   const d = S.melody
-  if (!d || d.profile === source) return
+  if (!d || (d.profile === source && !force)) return
   const want = source
   say('Wird neu ausgewertet …')
   setTimeout(() => {
     // Zwischenzeitlich umgeschaltet? Dann gilt der spätere Lauf.
     if (want !== source || S.melody !== d) return
     try {
-      const m = analyseMelody(d.buf, d.sr, want)
+      const m = analyseMelody(d.buf, d.sr, want, melodyGate())
       if (!m) {
         say(SOURCES[want].nothing, true)
         return
@@ -276,7 +318,7 @@ function draw() {
 /** Einziger Einstieg in die Analyse — egal ob Mikrofon oder Datei. */
 function ingest(buf, sr) {
   if (mode === 'melody') {
-    const m = analyseMelody(buf, sr, source)
+    const m = analyseMelody(buf, sr, source, melodyGate())
     if (!m) {
       say(SOURCES[source].nothing, true)
       refresh()
@@ -302,44 +344,66 @@ function ingest(buf, sr) {
   }
 }
 
-/* ══════════════ AUFNAHME ══════════════ */
-$('rec').addEventListener('click', async () => {
-  if (recording) {
-    stopRec()
-    return
-  }
-  try {
-    await ensureCtx()
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    })
-  } catch (e) {
-    say('Kein Zugriff aufs Mikrofon. Erlaubnis prüfen und erneut tippen.', true)
-    return
-  }
+/* ══════════════ MIKROFON ══════════════ */
+/**
+ * Mikrofon aufmachen und jeden Block an `onBlock` reichen.
+ *
+ * Aufnahme und Raummessung teilen sich diesen Weg — und damit auch die
+ * iOS-Regel, dass der Kontext danach sterben muss (siehe `dropRecordingCtx`).
+ * Wirft weiter, wenn der Nutzer das Mikrofon nicht freigibt.
+ */
+async function openMic(onBlock) {
+  await ensureCtx()
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  })
   recSR = ctx.sampleRate
-  chunks = []
-  recording = true
-  startT = performance.now()
-  live.length = 0
-  acc = new Float32Array(0)
-
   srcNode = ctx.createMediaStreamSource(stream)
   // ScriptProcessor statt AudioWorklet: läuft überall gleich, auch in älteren
   // Safari-Versionen, und eine Minute Mono kostet keine 12 MB.
   node = ctx.createScriptProcessor(2048, 1, 1)
-  node.onaudioprocess = (e) => {
-    if (!recording) return
-    const d = e.inputBuffer.getChannelData(0)
-    chunks.push(new Float32Array(d))
-    liveTick(d)
-    if ((performance.now() - startT) / 1000 >= MAX_SEC) stopRec()
-  }
+  node.onaudioprocess = (e) => onBlock(e.inputBuffer.getChannelData(0))
   srcNode.connect(node)
   const m = ctx.createGain()
   m.gain.value = 0
   node.connect(m)
   m.connect(ctx.destination)
+}
+
+function closeMic() {
+  try {
+    node.disconnect()
+    srcNode.disconnect()
+  } catch (e) {}
+  if (stream) stream.getTracks().forEach((t) => t.stop())
+  dropRecordingCtx()
+  micUse = null
+}
+
+/* ══════════════ AUFNAHME ══════════════ */
+$('rec').addEventListener('click', async () => {
+  if (micUse === 'rec') {
+    stopRec()
+    return
+  }
+  if (micUse) return // die Raummessung läuft, die dauert keine zwei Sekunden
+  chunks = []
+  live.length = 0
+  acc = new Float32Array(0)
+  try {
+    await openMic((d) => {
+      if (!recording) return
+      chunks.push(new Float32Array(d))
+      liveTick(d)
+      if ((performance.now() - startT) / 1000 >= MAX_SEC) stopRec()
+    })
+  } catch (e) {
+    say('Kein Zugriff aufs Mikrofon. Erlaubnis prüfen und erneut tippen.', true)
+    return
+  }
+  micUse = 'rec'
+  recording = true
+  startT = performance.now()
 
   $('rec').classList.add('armed')
   $('rec').setAttribute('aria-label', 'Aufnahme beenden')
@@ -355,12 +419,7 @@ function stopRec() {
   if (!recording) return
   recording = false
   clearInterval(timer)
-  try {
-    node.disconnect()
-    srcNode.disconnect()
-  } catch (e) {}
-  stream.getTracks().forEach((t) => t.stop())
-  dropRecordingCtx()
+  closeMic()
   $('rec').classList.remove('armed')
   $('rec').setAttribute('aria-label', 'Aufnahme starten')
   $('readout').classList.remove('on')
@@ -405,10 +464,11 @@ function livePitch() {
   const need = p.win * f
   if (acc.length < need) return 0
   const a = decimate(acc.subarray(acc.length - need), recSR, f)
-  return detect(a.buf, a.buf.length - p.win, p.win, a.sr, p).hz
+  return detect(a.buf, a.buf.length - p.win, p.win, a.sr, p, melodyGate()).hz
 }
 
 function liveTick(d) {
+  meterTick(d)
   const m = new Float32Array(acc.length + d.length)
   m.set(acc)
   m.set(d, acc.length)
@@ -429,6 +489,133 @@ function liveTick(d) {
   if (live.length > 460) live.shift()
   drawLive(cv, live, mode, SOURCES[source].view)
 }
+
+/* ══════════════ RAUM MESSEN ══════════════ */
+/** So lange wird gemessen. Kurz genug, dass niemand still sitzen mag. */
+const CAL_SEC = 1.5
+let calChunks = []
+let calStart = 0
+
+$('calBtn').addEventListener('click', async () => {
+  if (micUse === 'rec') {
+    say('Erst die Aufnahme beenden.', true)
+    return
+  }
+  if (micUse) return
+  calChunks = []
+  try {
+    await openMic((d) => {
+      if (micUse !== 'cal') return
+      calChunks.push(new Float32Array(d))
+      meterTick(d)
+      if ((performance.now() - calStart) / 1000 >= CAL_SEC) finishCal()
+    })
+  } catch (e) {
+    say('Kein Zugriff aufs Mikrofon. Erlaubnis prüfen und erneut tippen.', true)
+    return
+  }
+  micUse = 'cal'
+  calStart = performance.now()
+  $('calBtn').textContent = 'Misst …'
+  $('calBtn').disabled = true
+  say('Still sein — der Raum wird gemessen.')
+})
+
+function finishCal() {
+  closeMic()
+  $('calBtn').textContent = 'Raum messen'
+  $('calBtn').disabled = false
+  let n = 0
+  calChunks.forEach((c) => (n += c.length))
+  if (n < recSR * 0.5) {
+    say('Die Messung hat nichts geliefert. Nochmal tippen.', true)
+    return
+  }
+  const buf = new Float32Array(n)
+  let o = 0
+  calChunks.forEach((c) => {
+    buf.set(c, o)
+    o += c.length
+  })
+  calChunks = []
+  // Ein Boden je Auswertung: Die drei messen in drei verschiedenen Einheiten,
+  // und eine davon in die andere umzurechnen wäre geraten.
+  room = {
+    buf,
+    sr: recSR,
+    floor: {
+      whistle: noiseFloor(buf, recSR, 'whistle'),
+      voice: noiseFloor(buf, recSR, 'voice'),
+      beat: noiseFloorBeat(buf, recSR),
+    },
+  }
+  $('gateDb').disabled = false
+  showGate()
+  const f = room.floor[mode === 'beat' ? 'beat' : source]
+  say(
+    dbOf(f) > METER_FLOOR
+      ? 'Raum gemessen: Rauschboden ' + showDb(f) + '.'
+      : 'Hier ist es praktisch still. Die Sperre steht auf ihrer Untergrenze — mehr ist nicht nötig.',
+  )
+  regate()
+}
+
+$('calOff').addEventListener('click', () => {
+  room = null
+  $('gateDb').disabled = true
+  showGate()
+  say('Rauschsperre aus — es gilt wieder die eingebaute Vorgabe.')
+  regate()
+})
+
+/** Vorhandenes Material mit der neuen Sperre noch einmal durchrechnen. */
+function regate() {
+  if (S.beat) {
+    recomputeBeat()
+    invalidate('beat')
+  }
+  if (S.melody) reanalyse(true)
+  else refresh()
+}
+
+/* ══════════════ PEGELANZEIGE ══════════════ */
+const meterPos = (x) => Math.max(0, Math.min(1, (dbOf(x) - METER_FLOOR) / -METER_FLOOR))
+const pct = (x) => (meterPos(x) * 100).toFixed(1) + '%'
+
+function meterTick(d) {
+  let s = 0
+  for (let i = 0; i < d.length; i++) s += d[i] * d[i]
+  $('mfill').style.width = pct(Math.sqrt(s / d.length))
+}
+
+/**
+ * Marken und Beschriftung der Sperre auffrischen.
+ *
+ * Gezeigt wird immer der Boden der *aktuellen* Auswertung — beim Beat der aus
+ * den Bandhüllkurven, beim Gesang der hinter dem Tiefpass. Deshalb springt die
+ * Zahl beim Umschalten, und das ist richtig so: es sind verschiedene Messungen
+ * desselben Raums.
+ */
+function showGate() {
+  const which = mode === 'beat' ? 'beat' : source
+  const g = gateFor(which)
+  const f = room ? room.floor[which] : 0
+  $('mgate').style.left = pct(g)
+  $('mdead').style.width = pct(g)
+  $('mfloor').style.left = pct(f)
+  $('mfloor').classList.toggle('hidden', !room)
+  $('calOff').classList.toggle('hidden', !room)
+  $('gateDbV').textContent = '+' + $('gateDb').value + ' dB'
+  $('gateRead').textContent =
+    (room ? 'Boden ' + showDb(f) : 'ungemessen') + ' · Sperre ' + (g > 0 ? showDb(g) : 'aus')
+}
+
+$('gateDb').addEventListener('input', showGate)
+// Erst beim Loslassen rechnen: eine Minute Material neu auszuwerten dauert
+// Sekunden, und der Regler schickt beim Ziehen dreißig Ereignisse.
+$('gateDb').addEventListener('change', () => {
+  if (room) regate()
+})
 
 /* ══════════════ DATEI STATT MIKROFON ══════════════ */
 function toMono(audio) {
@@ -840,5 +1027,6 @@ addEventListener('resize', () => {
 export function start() {
   initFixtures()
   setSource(source, true)
+  showGate()
   refresh()
 }

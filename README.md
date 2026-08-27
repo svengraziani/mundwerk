@@ -19,6 +19,24 @@ npm run dev        # http://127.0.0.1:5173
 
 Kein Framework, keine Laufzeit-Abhängigkeiten — Vite ist das ganze Setup.
 
+## Rauschsperre
+
+„Raum messen" nimmt anderthalb Sekunden Stille auf und legt die Schwelle, unter
+der ein Frame als still gilt, auf den gemessenen Rauschboden plus einem
+einstellbaren Abstand (Vorgabe + 8 dB). Der Balken darunter zeigt den Pegel,
+den Boden und die Sperre; die Schraffur ist der tote Bereich.
+
+Ohne Messung gilt eine eingebaute Vorgabe von rund −44 dBFS. Gemessen wird
+dreimal aus demselben Schnipsel, weil Pfeifprofil, Gesangsprofil und
+Beat-Analyse in verschiedenen Einheiten messen — die angezeigte Zahl gehört
+immer zur aktuellen Auswertung.
+
+Sie hilft gegen alles, was *zwischen* den Tönen liegt: Lüftung, Straße,
+Rauschen. Beim Beat entkoppelt sie die Empfindlichkeit vom Raum — bei 70 %
+findet die Erkennung in einem Zimmer mit Lüftung 23 statt 16 Schlägen, mit
+Sperre wieder genau 16. Was während eines Tons lauter ist als der Ton selbst,
+trennt kein Pegelgate.
+
 ## Ohne Mikrofon arbeiten
 
 Im Dev-Server steht neben dem Aufnahmeknopf ein Auswahlfeld mit fünfzehn

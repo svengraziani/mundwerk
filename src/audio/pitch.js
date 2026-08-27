@@ -59,7 +59,14 @@ export const WIN = PROFILES.whistle.win
 export const FMIN = PROFILES.whistle.fmin
 export const FMAX = PROFILES.whistle.fmax
 
-const RMS_GATE = 0.006
+/**
+ * Vorgabe für die Rauschsperre, wenn der Raum nicht gemessen wurde.
+ *
+ * Etwa −44 dBFS. Ein Wert, der in einem üblichen Zimmer über dem Grundrauschen
+ * liegt und unter allem, was jemand absichtlich von sich gibt. Wer `noiseFloor`
+ * bemüht, bekommt einen besseren.
+ */
+export const RMS_GATE = 0.006
 
 /**
  * NSDF für einen Frame.
@@ -69,9 +76,10 @@ const RMS_GATE = 0.006
  * @param {number} size        Framelänge
  * @param {number} sr          Samplerate
  * @param {string|object} prof Profilname oder Profil; Vorgabe: Pfeifen
+ * @param {number} gate        Lautstärke, unter der ein Frame als still gilt
  * @returns {{hz:number, clarity:number, rms:number}} hz === 0 heißt: keine Tonhöhe
  */
-export function detect(buf, off, size, sr, prof = DEFAULT_PROFILE) {
+export function detect(buf, off, size, sr, prof = DEFAULT_PROFILE, gate = RMS_GATE) {
   const p = profileOf(prof)
   if (off < 0 || off + size > buf.length) return { hz: 0, clarity: 0, rms: 0 }
   let rms = 0
@@ -80,7 +88,7 @@ export function detect(buf, off, size, sr, prof = DEFAULT_PROFILE) {
     rms += v * v
   }
   rms = Math.sqrt(rms / size)
-  if (rms < RMS_GATE) return { hz: 0, clarity: 0, rms }
+  if (rms < gate) return { hz: 0, clarity: 0, rms }
 
   // Gesucht wird eine Oktave über dem Profilbereich — nicht, um sie zu melden
   // (die Prüfung ganz unten wirft alles über fmax weg), sondern damit sie
@@ -185,6 +193,41 @@ export function decimFactor(prof, sr) {
   const p = profileOf(prof)
   if (!p.rate) return 1
   return Math.max(1, Math.round(sr / p.rate))
+}
+
+/**
+ * Rauschboden einer Aufnahme: der Median der Frame-Lautstärken.
+ *
+ * Gedacht für eine kurze Aufnahme, in der niemand etwas macht — daraus wird
+ * die Schwelle, unter der Frames als still gelten. Gemessen wird durch
+ * dieselbe Kette wie die Analyse, beim Gesang also nach der Dezimierung: Ein
+ * Zischen bei 8 kHz, das der Tiefpass ohnehin wegnimmt, darf die Schwelle
+ * nicht anheben, sonst fällt hinterher leiser Gesang durchs Gate, der über dem
+ * hörbaren Rauschen lag.
+ *
+ * Median und nicht Mittelwert: eine zugeschlagene Tür während der Messung soll
+ * den Wert nicht mit hochziehen.
+ *
+ * @returns {number} 0, wenn der Puffer für keinen einzigen Frame reicht
+ */
+export function noiseFloor(buf, sr, prof = DEFAULT_PROFILE) {
+  const p = profileOf(prof)
+  const ana = decimate(buf, sr, decimFactor(p, sr))
+  const step = HOP / (sr / ana.sr)
+  const n = Math.max(0, Math.floor((ana.buf.length - p.win) / step))
+  if (!n) return 0
+  const v = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const o = Math.round(i * step)
+    let s = 0
+    for (let k = 0; k < p.win; k++) {
+      const x = ana.buf[o + k]
+      s += x * x
+    }
+    v[i] = Math.sqrt(s / p.win)
+  }
+  v.sort()
+  return v[n >> 1]
 }
 
 /** Medianfilter über die stimmhaften Nachbarn. Arbeitet in-place. */
@@ -371,10 +414,11 @@ export function normPos(hz, span) {
  * @param {Float32Array} buf
  * @param {number} sr
  * @param {string|object} prof  Profilname aus PROFILES; Vorgabe: Pfeifen
- * @returns {{buf, sr, frameRate, profile, pitch: Float32Array, amp: Float32Array, notes: Array}|null}
+ * @param {number} gate         Rauschsperre; siehe `noiseFloor`
+ * @returns {{buf, sr, frameRate, profile, gate, pitch: Float32Array, amp: Float32Array, notes: Array}|null}
  *          null, wenn zu wenige stimmhafte Frames zusammenkamen.
  */
-export function analyseMelody(buf, sr, prof = DEFAULT_PROFILE) {
+export function analyseMelody(buf, sr, prof = DEFAULT_PROFILE, gate = RMS_GATE) {
   const p = profileOf(prof)
   const frameRate = sr / HOP
   const ana = decimate(buf, sr, decimFactor(p, sr))
@@ -384,7 +428,7 @@ export function analyseMelody(buf, sr, prof = DEFAULT_PROFILE) {
   const cl = new Float32Array(n)
   const rm = new Float32Array(n)
   for (let i = 0; i < n; i++) {
-    const r = detect(ana.buf, Math.round(i * step), p.win, ana.sr, p)
+    const r = detect(ana.buf, Math.round(i * step), p.win, ana.sr, p, gate)
     hz[i] = r.hz
     cl[i] = r.clarity
     rm[i] = r.rms
@@ -412,7 +456,7 @@ export function analyseMelody(buf, sr, prof = DEFAULT_PROFILE) {
   for (let i = 0; i < n; i++) if (hz[i] > 0) voiced++
   if (voiced < 8) return null
 
-  return { buf, sr, frameRate, profile: p.id, pitch: hz, amp, notes: [], shaped: null }
+  return { buf, sr, frameRate, profile: p.id, gate, pitch: hz, amp, notes: [], shaped: null }
 }
 
 /**
