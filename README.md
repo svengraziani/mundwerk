@@ -8,7 +8,7 @@ Browser.
 
 Eine Aufnahme darf bis zu **eine Minute** lang sein. Im Melodie-Modus steht
 über der Spur ein Schalter für die Quelle: **Pfeifen** sucht zwischen 380 und
-4200 Hz, **Gesang** zwischen 75 und 1200 Hz — damit sind gesungene Vokale,
+4200 Hz, **Gesang** zwischen 75 und 1300 Hz — damit sind gesungene Vokale,
 Lalala und Summen abgedeckt, von E2 bis in die Sopranlage. Umschalten geht auch
 nach der Aufnahme; die Rohaufnahme bleibt liegen und wird neu ausgewertet.
 

@@ -35,12 +35,16 @@ export const HOP = 256
 export const PROFILES = {
   // Pfeifen liegt hoch und ist fast ein Sinus: schmales Fenster, harte Schwellen.
   whistle: { id: 'whistle', fmin: 380, fmax: 4200, win: 1024, rate: 0, clarityMin: 0.55, clarityKeep: 0.75, peakRatio: 0.88 },
-  // Gesang: von der tiefen Männerstimme (E2) bis in die Sopranlage. Ein Vokal
+  // Gesang: von der tiefen Männerstimme (E2) bis über die Sopranlage hinaus.
+  // fmax liegt bewusst eine Terz über dem, was praktisch gesungen wird: an der
+  // Bereichsgrenze schiebt schon ein normales Vibrato einzelne Frames hinaus,
+  // und die fallen dann weg. Bei fmax 1200 kostete ein Ton auf 1200 Hz 95 von
+  // 200 Frames und 20 Cent, bei 1300 keinen einzigen. Ein Vokal
   // bringt zwanzig Teiltöne mit, die NSDF wird dadurch zackiger — deshalb
   // weichere Klarheitsschwellen, aber ein *härteres* peakRatio: bei 0.88
   // rutscht die Erkennung auf einem gesungenen „a“ regelmäßig auf den dritten
   // Teilton, weil der erste Formant genau dort liegt (siehe sing-lala.wav).
-  voice: { id: 'voice', fmin: 75, fmax: 1200, win: 512, rate: 12000, clarityMin: 0.5, clarityKeep: 0.68, peakRatio: 0.94 },
+  voice: { id: 'voice', fmin: 75, fmax: 1300, win: 512, rate: 12000, clarityMin: 0.5, clarityKeep: 0.68, peakRatio: 0.94 },
 }
 
 export const DEFAULT_PROFILE = 'whistle'
@@ -78,7 +82,14 @@ export function detect(buf, off, size, sr, prof = DEFAULT_PROFILE) {
   rms = Math.sqrt(rms / size)
   if (rms < RMS_GATE) return { hz: 0, clarity: 0, rms }
 
-  const tMin = Math.max(2, Math.floor(sr / p.fmax))
+  // Gesucht wird eine Oktave über dem Profilbereich — nicht, um sie zu melden
+  // (die Prüfung ganz unten wirft alles über fmax weg), sondern damit sie
+  // überhaupt gefunden *wird*. Reicht die Suche nur bis fmax, ist der oberste
+  // Ton des Profils unerreichbar, und für alles darüber liefert der erste Peak
+  // oberhalb der Schwelle 2T: das Ergebnis ist dann exakt eine Oktave zu tief
+  // und liegt auch noch im Bereich, wird also angenommen. Ein hoher Sopranton
+  // käme so still als Alt heraus.
+  const tMin = Math.max(2, Math.floor(sr / (2 * p.fmax)))
   const tMax = Math.min(size - 2, Math.floor(sr / p.fmin))
   if (tMax <= tMin) return { hz: 0, clarity: 0, rms }
   const nsdf = new Float32Array(tMax + 1)

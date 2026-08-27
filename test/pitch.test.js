@@ -43,6 +43,27 @@ test('detect schweigt bei Stille und außerhalb des Pfeifbereichs', () => {
   assert.equal(detect(silence, 900, 1024, sr).hz, 0, 'Frame ragt über das Ende hinaus')
 })
 
+test('der oberste Ton eines Profils landet nicht eine Oktave tiefer', () => {
+  // Die Peaksuche fängt einen Lag über tMin an. Steht tMin genau auf der
+  // Periode von fmax, ist der Grundton dort unerreichbar und der erste Peak
+  // oberhalb der Schwelle liegt bei 2T — das Ergebnis ist dann exakt eine
+  // Oktave zu tief und wird auch noch angenommen, weil es im Bereich liegt.
+  for (const id of ['whistle', 'voice']) {
+    const p = PROFILES[id]
+    const sr = p.rate || 44100
+    const buf = new Float32Array(4 * p.win)
+    for (const hz of [p.fmax * 0.96, p.fmax * 0.98]) {
+      for (let i = 0; i < buf.length; i++) buf[i] = Math.sin((2 * Math.PI * hz * i) / sr)
+      const cents = 1200 * Math.log2(detect(buf, 0, p.win, sr, id).hz / hz)
+      assert.ok(Math.abs(cents) < 25, `${id} bei ${hz.toFixed(0)} Hz: ${cents.toFixed(0)} Cent daneben`)
+    }
+    // Was wirklich darüber liegt, gehört verworfen und nicht halbiert.
+    const over = p.fmax * 1.2
+    for (let i = 0; i < buf.length; i++) buf[i] = Math.sin((2 * Math.PI * over * i) / sr)
+    assert.equal(detect(buf, 0, p.win, sr, id).hz, 0, `${id}: ${over.toFixed(0)} Hz liegt über fmax`)
+  }
+})
+
 /* ── Profile ────────────────────────────────────────────── */
 test('das Gesangsprofil findet, was dem Pfeifprofil zu tief ist', () => {
   const sr = 12000 // Analyserate des Gesangsprofils

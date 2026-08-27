@@ -38,7 +38,7 @@ abbilden kann. Bei ±12 Halbtönen wird aus einer durchgezogenen Phrase über ei
 Oktave *eine* Note mit Bend-Kurve. Das ist Absicht.
 
 **Zwei Profile, kein gemeinsamer Bereich.** `PROFILES.whistle` sucht zwischen
-380 und 4200 Hz, `PROFILES.voice` zwischen 75 und 1200 Hz. Ein Bereich für
+380 und 4200 Hz, `PROFILES.voice` zwischen 75 und 1300 Hz. Ein Bereich für
 beides wäre für beide schlechter: Der Pfeifbereich fängt tief keine Stimme, und
 ein bis 4200 Hz offenes Gesangsprofil landet dauernd auf einem Teilton. Welches
 Profil gilt, entscheidet der Nutzer über den Schalter *Pfeifen / Gesang* — die
@@ -55,6 +55,26 @@ gut 11 kHz, danach ist das Gesangsprofil sogar billiger als das Pfeifprofil
 (gemessen: 1,5 s gegen 2,4 s für eine Minute). Der Frameabstand bleibt trotzdem
 `HOP` Samples der **Quelle**, damit `frameRate` und alles dahinter — Zeichnung,
 Kurven-Export, Notenzeiten — unverändert weiterrechnen.
+
+**Der Tiefpass vor der Dezimierung ist kein Nebeneffekt, sondern der Grund.**
+Wer die Dezimierung für einen Kompromiss zugunsten der Geschwindigkeit hält und
+sie herausnimmt, macht die Erkennung *schlechter*. Gemessen über den ganzen
+Gesangsbereich (`sauber` und mit Rauschen) sind dezimiert und roh auf ein
+Zehntel Cent identisch, in Bias wie in Jitter. Liegt dagegen Energie oberhalb
+von 5 kHz — Zischlaute, Atem, Raumrauschen, Beckenanteile —, geht die rohe
+Rechnung um 20 bis 40 Cent daneben und zappelt um bis zu 35 Cent, die
+dezimierte bleibt bei einem Cent. `decimate()` ist Tiefpass *plus*
+Unterabtastung: Der Tiefpass macht die Genauigkeit, die Unterabtastung das
+Tempo, und sie kostet nichts.
+
+**Gesucht wird eine Oktave über `fmax`.** Nicht um sie zu melden — die Prüfung
+am Ende von `detect` wirft alles über `fmax` weg —, sondern damit sie gefunden
+*wird*. Reicht die Lag-Suche nur bis `fmax`, ist der oberste Ton des Profils
+unerreichbar, und für alles darüber liefert der erste Peak oberhalb der
+Schwelle 2T: exakt eine Oktave zu tief, und weil das Ergebnis im Bereich liegt,
+wird es auch noch angenommen. Ein hoher Sopranton käme so still als Alt heraus.
+`test/pitch.test.js` hält beide Richtungen fest: 98 % von `fmax` muss getroffen,
+102 % muss verworfen werden.
 
 **Das Analysefenster ist beim Gesang doppelt so lang** (46 statt 23 ms), weil
 tiefe Töne lange Perioden haben. Der Preis: Was sich innerhalb eines Fensters
