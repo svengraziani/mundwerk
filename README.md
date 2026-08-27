@@ -1,9 +1,16 @@
 # Mundwerk
 
-Pfeifen wird ein Blasinstrument, Mundbeats werden Drums. Beides geht als MIDI
-raus — klassisch oder als MPE, mit Pitch Bend, Velocity und Druck, damit
-Schleifer und Dynamik in der DAW nicht verloren gehen. Wer die Kurve selbst
-braucht, holt sie als CSV oder JSON. Läuft komplett lokal im Browser.
+Pfeifen wird ein Blasinstrument, Gesungenes auch, Mundbeats werden Drums.
+Alles geht als MIDI raus — klassisch oder als MPE, mit Pitch Bend, Velocity und
+Druck, damit Schleifer und Dynamik in der DAW nicht verloren gehen. Wer die
+Kurve selbst braucht, holt sie als CSV oder JSON. Läuft komplett lokal im
+Browser.
+
+Eine Aufnahme darf bis zu **eine Minute** lang sein. Im Melodie-Modus steht
+über der Spur ein Schalter für die Quelle: **Pfeifen** sucht zwischen 380 und
+4200 Hz, **Gesang** zwischen 75 und 1300 Hz — damit sind gesungene Vokale,
+Lalala und Summen abgedeckt, von E2 bis in die Sopranlage. Umschalten geht auch
+nach der Aufnahme; die Rohaufnahme bleibt liegen und wird neu ausgewertet.
 
 ```
 npm install
@@ -12,11 +19,30 @@ npm run dev        # http://127.0.0.1:5173
 
 Kein Framework, keine Laufzeit-Abhängigkeiten — Vite ist das ganze Setup.
 
+## Rauschsperre
+
+„Raum messen" nimmt anderthalb Sekunden Stille auf und legt die Schwelle, unter
+der ein Frame als still gilt, auf den gemessenen Rauschboden plus einem
+einstellbaren Abstand (Vorgabe + 8 dB). Der Balken darunter zeigt den Pegel,
+den Boden und die Sperre; die Schraffur ist der tote Bereich.
+
+Ohne Messung gilt eine eingebaute Vorgabe von rund −44 dBFS. Gemessen wird
+dreimal aus demselben Schnipsel, weil Pfeifprofil, Gesangsprofil und
+Beat-Analyse in verschiedenen Einheiten messen — die angezeigte Zahl gehört
+immer zur aktuellen Auswertung.
+
+Sie hilft gegen alles, was *zwischen* den Tönen liegt: Lüftung, Straße,
+Rauschen. Beim Beat entkoppelt sie die Empfindlichkeit vom Raum — bei 70 %
+findet die Erkennung in einem Zimmer mit Lüftung 23 statt 16 Schlägen, mit
+Sperre wieder genau 16. Was während eines Tons lauter ist als der Ton selbst,
+trennt kein Pegelgate.
+
 ## Ohne Mikrofon arbeiten
 
-Im Dev-Server steht neben dem Aufnahmeknopf ein Auswahlfeld mit elf
+Im Dev-Server steht neben dem Aufnahmeknopf ein Auswahlfeld mit fünfzehn
 Testaufnahmen aus `fixtures/`, dazu „Datei laden“ für eigenes Material. Die
-Analyse ist derselbe Pfad wie bei einer Aufnahme.
+Analyse ist derselbe Pfad wie bei einer Aufnahme; eine Testaufnahme stellt Modus
+und Quelle gleich mit ein.
 
 ```
 npm test           # node --test gegen die Fixtures, kein Mikrofon nötig
@@ -34,7 +60,7 @@ sein.
 **MIDI als MPE.** Untere Zone, Kanal 1 als Master, die Anzahl der Stimmkanäle
 als MPE Configuration Message. Jede Note wandert reihum auf einen eigenen
 Member-Kanal — Bend und Druck gelten damit genau dieser Stimme. Dazu CC74 als
-Y-Achse: wie hoch im Umfang der Aufnahme gerade gepfiffen wird. Der Bend-Umfang
+Y-Achse: wie hoch im Umfang der Aufnahme gerade gepfiffen oder gesungen wird. Der Bend-Umfang
 steht auf jedem Member-Kanal, nicht nur auf einem; damit stellt sich das
 Ziel-Instrument selbst richtig ein. Liegt ein Beat dabei, wird die Zone
 kleiner, damit Kanal 10 für die Drums frei bleibt.

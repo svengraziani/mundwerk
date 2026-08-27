@@ -1,22 +1,72 @@
 /**
- * Tonhöhenerkennung für Pfeifen.
+ * Tonhöhenerkennung für Pfeifen und Gesang.
  *
- * NSDF / McLeod Pitch Method pro Frame, danach vier Aufräumstufen
- * (Median, Oktave, Lücken, Kurzläufer) und daraus die Notensegmentierung.
+ * NSDF / McLeod Pitch Method pro Frame, danach fünf Aufräumstufen
+ * (Median, Oktave, Ausreißer, Lücken, Kurzläufer) und daraus die
+ * Notensegmentierung.
+ *
+ * Welcher Frequenzbereich gesucht wird, steht im Profil (PROFILES) und nicht
+ * mehr fest im Code — gepfiffen wird oberhalb von 380 Hz, gesungen zwei
+ * Oktaven darunter, und mit einem einzigen Bereich für beides wäre keiner der
+ * beiden gut bedient.
  *
  * Keine DOM- und keine WebAudio-Abhängigkeit: rein Float32Array + Samplerate
  * rein, Zahlen raus. Diese Datei ist der erste Kandidat für den Swift-Port.
  */
 
-export const WIN = 1024
 export const HOP = 256
-export const FMIN = 380 // Pfeifen liegt hoch; alles darunter ist Raumbrummen
-export const FMAX = 4200
 
-const RMS_GATE = 0.006
-const CLARITY_MIN = 0.55 // Frame ohne Tonhöhe
-const CLARITY_KEEP = 0.75 // Frame, dem wir wirklich trauen
-const PEAK_RATIO = 0.88 // wie nah ein NSDF-Peak am Maximum liegen muss
+/**
+ * Analyseprofile.
+ *
+ * `win` zählt Samples *der Analyserate*, nicht der Quelle: wo `rate` gesetzt
+ * ist, wird vor der Erkennung dezimiert (siehe `decimate`). Ohne das kostet
+ * der tiefe Suchbereich des Gesangsprofils rund das Neunfache eines
+ * Pfeifframes — bei einer Minute Aufnahme ist das der Unterschied zwischen
+ * „kurz warten“ und „Tab eingefroren“.
+ *
+ * - `fmin`/`fmax`  Suchbereich in Hz
+ * - `win`          Framelänge in Samples der Analyserate
+ * - `rate`         Zielrate der Analyse in Hz, 0 = mit der Quellrate rechnen
+ * - `clarityMin`   darunter gilt der Frame als tonlos
+ * - `clarityKeep`  darunter wird der Frame nachträglich verworfen
+ * - `peakRatio`    wie nah ein NSDF-Peak am Maximum liegen muss
+ */
+export const PROFILES = {
+  // Pfeifen liegt hoch und ist fast ein Sinus: schmales Fenster, harte Schwellen.
+  whistle: { id: 'whistle', fmin: 380, fmax: 4200, win: 1024, rate: 0, clarityMin: 0.55, clarityKeep: 0.75, peakRatio: 0.88 },
+  // Gesang: von der tiefen Männerstimme (E2) bis über die Sopranlage hinaus.
+  // fmax liegt bewusst eine Terz über dem, was praktisch gesungen wird: an der
+  // Bereichsgrenze schiebt schon ein normales Vibrato einzelne Frames hinaus,
+  // und die fallen dann weg. Bei fmax 1200 kostete ein Ton auf 1200 Hz 95 von
+  // 200 Frames und 20 Cent, bei 1300 keinen einzigen. Ein Vokal
+  // bringt zwanzig Teiltöne mit, die NSDF wird dadurch zackiger — deshalb
+  // weichere Klarheitsschwellen, aber ein *härteres* peakRatio: bei 0.88
+  // rutscht die Erkennung auf einem gesungenen „a“ regelmäßig auf den dritten
+  // Teilton, weil der erste Formant genau dort liegt (siehe sing-lala.wav).
+  voice: { id: 'voice', fmin: 75, fmax: 1300, win: 512, rate: 12000, clarityMin: 0.5, clarityKeep: 0.68, peakRatio: 0.94 },
+}
+
+export const DEFAULT_PROFILE = 'whistle'
+
+/** Profil nachschlagen. Unbekannte Namen fallen aufs Pfeifprofil zurück. */
+export function profileOf(p) {
+  if (p && typeof p === 'object') return p
+  return PROFILES[p] || PROFILES[DEFAULT_PROFILE]
+}
+
+export const WIN = PROFILES.whistle.win
+export const FMIN = PROFILES.whistle.fmin
+export const FMAX = PROFILES.whistle.fmax
+
+/**
+ * Vorgabe für die Rauschsperre, wenn der Raum nicht gemessen wurde.
+ *
+ * Etwa −44 dBFS. Ein Wert, der in einem üblichen Zimmer über dem Grundrauschen
+ * liegt und unter allem, was jemand absichtlich von sich gibt. Wer `noiseFloor`
+ * bemüht, bekommt einen besseren.
+ */
+export const RMS_GATE = 0.006
 
 /**
  * NSDF für einen Frame.
@@ -25,9 +75,12 @@ const PEAK_RATIO = 0.88 // wie nah ein NSDF-Peak am Maximum liegen muss
  * @param {number} off         Startindex des Frames
  * @param {number} size        Framelänge
  * @param {number} sr          Samplerate
+ * @param {string|object} prof Profilname oder Profil; Vorgabe: Pfeifen
+ * @param {number} gate        Lautstärke, unter der ein Frame als still gilt
  * @returns {{hz:number, clarity:number, rms:number}} hz === 0 heißt: keine Tonhöhe
  */
-export function detect(buf, off, size, sr) {
+export function detect(buf, off, size, sr, prof = DEFAULT_PROFILE, gate = RMS_GATE) {
+  const p = profileOf(prof)
   if (off < 0 || off + size > buf.length) return { hz: 0, clarity: 0, rms: 0 }
   let rms = 0
   for (let i = 0; i < size; i++) {
@@ -35,10 +88,18 @@ export function detect(buf, off, size, sr) {
     rms += v * v
   }
   rms = Math.sqrt(rms / size)
-  if (rms < RMS_GATE) return { hz: 0, clarity: 0, rms }
+  if (rms < gate) return { hz: 0, clarity: 0, rms }
 
-  const tMin = Math.max(2, Math.floor(sr / FMAX))
-  const tMax = Math.min(size - 2, Math.floor(sr / FMIN))
+  // Gesucht wird eine Oktave über dem Profilbereich — nicht, um sie zu melden
+  // (die Prüfung ganz unten wirft alles über fmax weg), sondern damit sie
+  // überhaupt gefunden *wird*. Reicht die Suche nur bis fmax, ist der oberste
+  // Ton des Profils unerreichbar, und für alles darüber liefert der erste Peak
+  // oberhalb der Schwelle 2T: das Ergebnis ist dann exakt eine Oktave zu tief
+  // und liegt auch noch im Bereich, wird also angenommen. Ein hoher Sopranton
+  // käme so still als Alt heraus.
+  const tMin = Math.max(2, Math.floor(sr / (2 * p.fmax)))
+  const tMax = Math.min(size - 2, Math.floor(sr / p.fmin))
+  if (tMax <= tMin) return { hz: 0, clarity: 0, rms }
   const nsdf = new Float32Array(tMax + 1)
   for (let t = tMin; t <= tMax; t++) {
     let ac = 0
@@ -55,11 +116,11 @@ export function detect(buf, off, size, sr) {
 
   let best = 0
   for (let t = tMin; t <= tMax; t++) if (nsdf[t] > best) best = nsdf[t]
-  if (best < CLARITY_MIN) return { hz: 0, clarity: best, rms }
+  if (best < p.clarityMin) return { hz: 0, clarity: best, rms }
 
   // Erster Peak oberhalb der Schwelle, nicht der höchste: sonst landet man
   // regelmäßig eine Oktave zu tief.
-  const thr = best * PEAK_RATIO
+  const thr = best * p.peakRatio
   let pick = -1
   for (let t = tMin + 1; t < tMax; t++) {
     if (nsdf[t] > nsdf[t - 1] && nsdf[t] >= nsdf[t + 1] && nsdf[t] > thr) {
@@ -74,8 +135,99 @@ export function detect(buf, off, size, sr) {
   const y2 = nsdf[pick + 1]
   const den = 2 * (2 * y1 - y0 - y2)
   const hz = sr / (pick + (den !== 0 ? (y2 - y0) / den : 0))
-  if (hz < FMIN || hz > FMAX) return { hz: 0, clarity: y1, rms }
+  if (hz < p.fmin || hz > p.fmax) return { hz: 0, clarity: y1, rms }
   return { hz, clarity: y1, rms }
+}
+
+/* ── Dezimierung ────────────────────────────────────────── */
+
+/** Ein RBJ-Tiefpass, Direct Form I. Nicht in-place. */
+function lowpass(x, sr, freq, q = 0.7071) {
+  const w0 = (2 * Math.PI * freq) / sr
+  const cos = Math.cos(w0)
+  const alpha = Math.sin(w0) / (2 * q)
+  const a0 = 1 + alpha
+  const b0 = (1 - cos) / 2 / a0
+  const b1 = (1 - cos) / a0
+  const b2 = b0
+  const a1 = (-2 * cos) / a0
+  const a2 = (1 - alpha) / a0
+  const out = new Float32Array(x.length)
+  let x1 = 0
+  let x2 = 0
+  let y1 = 0
+  let y2 = 0
+  for (let i = 0; i < x.length; i++) {
+    const x0 = x[i]
+    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+    out[i] = y0
+    x2 = x1
+    x1 = x0
+    y2 = y1
+    y1 = y0
+  }
+  return out
+}
+
+/**
+ * Um `factor` unterabtasten, mit Antialiasing davor.
+ *
+ * Zwei Tiefpässe hintereinander (24 dB/Oktave) bei 40 % der neuen Rate: ein
+ * einzelner Biquad lässt oberhalb der neuen Nyquistfrequenz genug stehen, dass
+ * Zischlaute als Brummen zurückfalten und die Erkennung durcheinanderbringen.
+ *
+ * @returns {{buf:Float32Array, sr:number}}
+ */
+export function decimate(buf, sr, factor) {
+  if (factor <= 1) return { buf, sr }
+  const newSr = sr / factor
+  const filtered = lowpass(lowpass(buf, sr, newSr * 0.4), sr, newSr * 0.4)
+  const n = Math.floor(buf.length / factor)
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) out[i] = filtered[i * factor]
+  return { buf: out, sr: newSr }
+}
+
+/** Dezimierungsfaktor für ein Profil bei gegebener Quellrate. */
+export function decimFactor(prof, sr) {
+  const p = profileOf(prof)
+  if (!p.rate) return 1
+  return Math.max(1, Math.round(sr / p.rate))
+}
+
+/**
+ * Rauschboden einer Aufnahme: der Median der Frame-Lautstärken.
+ *
+ * Gedacht für eine kurze Aufnahme, in der niemand etwas macht — daraus wird
+ * die Schwelle, unter der Frames als still gelten. Gemessen wird durch
+ * dieselbe Kette wie die Analyse, beim Gesang also nach der Dezimierung: Ein
+ * Zischen bei 8 kHz, das der Tiefpass ohnehin wegnimmt, darf die Schwelle
+ * nicht anheben, sonst fällt hinterher leiser Gesang durchs Gate, der über dem
+ * hörbaren Rauschen lag.
+ *
+ * Median und nicht Mittelwert: eine zugeschlagene Tür während der Messung soll
+ * den Wert nicht mit hochziehen.
+ *
+ * @returns {number} 0, wenn der Puffer für keinen einzigen Frame reicht
+ */
+export function noiseFloor(buf, sr, prof = DEFAULT_PROFILE) {
+  const p = profileOf(prof)
+  const ana = decimate(buf, sr, decimFactor(p, sr))
+  const step = HOP / (sr / ana.sr)
+  const n = Math.max(0, Math.floor((ana.buf.length - p.win) / step))
+  if (!n) return 0
+  const v = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const o = Math.round(i * step)
+    let s = 0
+    for (let k = 0; k < p.win; k++) {
+      const x = ana.buf[o + k]
+      s += x * x
+    }
+    v[i] = Math.sqrt(s / p.win)
+  }
+  v.sort()
+  return v[n >> 1]
 }
 
 /** Medianfilter über die stimmhaften Nachbarn. Arbeitet in-place. */
@@ -97,7 +249,13 @@ export function medianFix(a, k) {
 }
 
 /**
- * Halbierungs- und Verdopplungsfehler gegen den lokalen Median korrigieren.
+ * Teiltonfehler gegen den lokalen Median korrigieren.
+ *
+ * Neben der Oktave (Faktor 2) auch die Quinte darüber (Faktor 3): beim Pfeifen
+ * kommt die praktisch nicht vor, bei einer Stimme schon — wenn ein gesungener
+ * Ton ausklingt, bleibt oft nur noch ein Teilton stehen, und die Erkennung
+ * springt für zwei, drei Frames auf dessen Frequenz.
+ *
  * Zwei Durchgänge, weil ein einzelner Ausreißer den Median des Nachbarn
  * mitverschiebt. In-place.
  */
@@ -106,12 +264,47 @@ export function octaveFix(a) {
     for (let i = 0; i < a.length; i++) {
       if (!a[i]) continue
       const t = []
-      for (let j = i - 4; j <= i + 4; j++) if (j >= 0 && j < a.length && j !== i && a[j] > 0) t.push(a[j])
+      // ±6 Frames, nicht ±4: eine ausklingende Stimme hält sich gern ein
+      // halbes Dutzend Frames lang auf einem Teilton. Bei ±4 besteht der
+      // Median am Anfang so einer Strecke schon zur Hälfte aus den falschen
+      // Werten, und dann korrigiert sie niemand mehr.
+      for (let j = i - 6; j <= i + 6; j++) if (j >= 0 && j < a.length && j !== i && a[j] > 0) t.push(a[j])
       if (t.length < 3) continue
       t.sort((x, y) => x - y)
       const r = a[i] / t[t.length >> 1]
       if (r > 1.7 && r < 2.3) a[i] /= 2
       else if (r > 0.42 && r < 0.58) a[i] *= 2
+      // Nur nach unten: ein Teilton zieht die Messung hoch, nie herunter. Mit
+      // einem Zweig für den Fall „ein Drittel des Medians“ würde ein *guter*
+      // Frame neben einer Handvoll schlechter auf deren Teilton hochgezogen —
+      // der Fehler frisst sich dann rückwärts durch die Phrase.
+      else if (r > 2.7 && r < 3.3) a[i] /= 3
+    }
+}
+
+/**
+ * Frames, die weit neben dem lokalen Median liegen, verwerfen. In-place.
+ *
+ * Der Rest hinter `octaveFix`: An Ein- und Ausschwingern einer Stimme hängt
+ * die Erkennung nicht nur an der Oktave oder der Quinte, sondern an
+ * irgendeinem Teilton — beim tiefen „o“ am fünften, am siebten. Für jedes
+ * Verhältnis einen eigenen Zweig zu schreiben wäre sinnlos; hier wird deshalb
+ * nicht geraten, sondern weggeworfen. Vier Frames weniger am Notenanfang sind
+ * ein besserer Handel als vier Frames zweieinhalb Oktaven daneben.
+ *
+ * Zwei Durchgänge wie bei `octaveFix`, und aus demselben Grund: am Anfang
+ * einer solchen Strecke steht die Hälfte der Nachbarschaft selbst noch auf dem
+ * Teilton. Erst wenn die hinteren weg sind, fällt der erste auf.
+ */
+export function dropOutliers(a, maxCents) {
+  for (let p = 0; p < 2; p++)
+    for (let i = 0; i < a.length; i++) {
+      if (!a[i]) continue
+      const t = []
+      for (let j = i - 6; j <= i + 6; j++) if (j >= 0 && j < a.length && j !== i && a[j] > 0) t.push(a[j])
+      if (t.length < 3) continue
+      t.sort((x, y) => x - y)
+      if (Math.abs(1200 * Math.log2(a[i] / t[t.length >> 1])) > maxCents) a[i] = 0
     }
 }
 
@@ -213,25 +406,41 @@ export function normPos(hz, span) {
 /**
  * Kompletter Melodie-Durchlauf.
  *
- * @returns {{buf, sr, frameRate, pitch: Float32Array, amp: Float32Array, notes: Array}|null}
+ * Die Frames liegen immer HOP Samples der *Quelle* auseinander, auch wenn für
+ * die Erkennung dezimiert wird. Damit bleibt `frameRate` sr/HOP, und alles
+ * dahinter — Zeichnung, Kurven-Export, Notenzeiten — rechnet unverändert
+ * weiter, egal mit welchem Profil analysiert wurde.
+ *
+ * @param {Float32Array} buf
+ * @param {number} sr
+ * @param {string|object} prof  Profilname aus PROFILES; Vorgabe: Pfeifen
+ * @param {number} gate         Rauschsperre; siehe `noiseFloor`
+ * @returns {{buf, sr, frameRate, profile, gate, pitch: Float32Array, amp: Float32Array, notes: Array}|null}
  *          null, wenn zu wenige stimmhafte Frames zusammenkamen.
  */
-export function analyseMelody(buf, sr) {
+export function analyseMelody(buf, sr, prof = DEFAULT_PROFILE, gate = RMS_GATE) {
+  const p = profileOf(prof)
   const frameRate = sr / HOP
-  const n = Math.max(0, Math.floor((buf.length - WIN) / HOP))
+  const ana = decimate(buf, sr, decimFactor(p, sr))
+  const step = HOP / (sr / ana.sr) // Frameabstand in Samples der Analyserate
+  const n = Math.max(0, Math.floor((ana.buf.length - p.win) / step))
   const hz = new Float32Array(n)
   const cl = new Float32Array(n)
   const rm = new Float32Array(n)
   for (let i = 0; i < n; i++) {
-    const r = detect(buf, i * HOP, WIN, sr)
+    const r = detect(ana.buf, Math.round(i * step), p.win, ana.sr, p, gate)
     hz[i] = r.hz
     cl[i] = r.clarity
     rm[i] = r.rms
   }
-  for (let i = 0; i < n; i++) if (cl[i] < CLARITY_KEEP) hz[i] = 0
+  for (let i = 0; i < n; i++) if (cl[i] < p.clarityKeep) hz[i] = 0
 
   medianFix(hz, 5)
   octaveFix(hz)
+  // 700 Cent: eine Quinte. Darüber ist es keine Melodie mehr, sondern ein
+  // Teilton — kein gepfiffener und kein gesungener Ton bewegt sich innerhalb
+  // von fünf Millisekunden so weit.
+  dropOutliers(hz, 700)
   bridgeGaps(hz, 4)
   dropRuns(hz, 6)
   medianFix(hz, 3)
@@ -247,11 +456,11 @@ export function analyseMelody(buf, sr) {
   for (let i = 0; i < n; i++) if (hz[i] > 0) voiced++
   if (voiced < 8) return null
 
-  return { buf, sr, frameRate, pitch: hz, amp, notes: [], shaped: null }
+  return { buf, sr, frameRate, profile: p.id, gate, pitch: hz, amp, notes: [], shaped: null }
 }
 
 /**
- * Die gepfeifte Kontur in die Zielkontur umrechnen.
+ * Die aufgenommene Kontur in die Zielkontur umrechnen.
  *
  * Trennt langsame Bewegung (die Melodie) von schneller (das Vibrato) über ein
  * 85-ms-Mittel und skaliert nur letztere. `quant` zieht die *Basis* auf

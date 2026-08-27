@@ -3,6 +3,7 @@
     "file": "whistle-clean.wav",
     "label": "Pfeifen — sauber",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2.85,
     "expect": {
       "notes": [
@@ -38,6 +39,7 @@
     "file": "whistle-vibrato.wav",
     "label": "Pfeifen — starkes Vibrato",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2.67,
     "expect": {
       "notes": [
@@ -63,6 +65,7 @@
     "file": "whistle-reverb.wav",
     "label": "Pfeifen — verhallt",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2.22,
     "expect": {
       "notes": [
@@ -88,6 +91,7 @@
     "file": "whistle-noisy.wav",
     "label": "Pfeifen — mit Raumrauschen",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2.07,
     "expect": {
       "notes": [
@@ -113,6 +117,7 @@
     "file": "whistle-octave-bait.wav",
     "label": "Pfeifen — starker 2. Teilton",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2.07,
     "expect": {
       "notes": [
@@ -138,6 +143,7 @@
     "file": "whistle-glide.wav",
     "label": "Pfeifen — ein Glissando",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 1.9,
     "expect": {
       "notes": 1,
@@ -146,9 +152,110 @@
     }
   },
   {
+    "file": "sing-lala.wav",
+    "label": "Gesang — la la la",
+    "mode": "melody",
+    "source": "voice",
+    "seconds": 3.4,
+    "expect": {
+      "notes": [
+        {
+          "midi": 57,
+          "start": 0.15,
+          "end": 0.65
+        },
+        {
+          "midi": 59,
+          "start": 0.77,
+          "end": 1.27
+        },
+        {
+          "midi": 60,
+          "start": 1.39,
+          "end": 1.89
+        },
+        {
+          "midi": 62,
+          "start": 2.01,
+          "end": 2.51
+        },
+        {
+          "midi": 64,
+          "start": 2.63,
+          "end": 3.13
+        }
+      ]
+    }
+  },
+  {
+    "file": "sing-low.wav",
+    "label": "Gesang — tiefe Stimme",
+    "mode": "melody",
+    "source": "voice",
+    "seconds": 2.52,
+    "expect": {
+      "notes": [
+        {
+          "midi": 40,
+          "start": 0.15,
+          "end": 0.75
+        },
+        {
+          "midi": 43,
+          "start": 0.89,
+          "end": 1.49
+        },
+        {
+          "midi": 45,
+          "start": 1.63,
+          "end": 2.23
+        }
+      ]
+    }
+  },
+  {
+    "file": "sing-high.wav",
+    "label": "Gesang — hohe Stimme",
+    "mode": "melody",
+    "source": "voice",
+    "seconds": 2.46,
+    "expect": {
+      "notes": [
+        {
+          "midi": 69,
+          "start": 0.15,
+          "end": 0.75
+        },
+        {
+          "midi": 72,
+          "start": 0.87,
+          "end": 1.47
+        },
+        {
+          "midi": 76,
+          "start": 1.59,
+          "end": 2.19
+        }
+      ]
+    }
+  },
+  {
+    "file": "sing-glide.wav",
+    "label": "Gesang — ein Portamento",
+    "mode": "melody",
+    "source": "voice",
+    "seconds": 1.9,
+    "expect": {
+      "notes": 1,
+      "from": 52,
+      "to": 59
+    }
+  },
+  {
     "file": "error-quiet.wav",
     "label": "Fehlerfall — zu leise",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2,
     "expect": {
       "fails": true
@@ -158,6 +265,7 @@
     "file": "error-noise.wav",
     "label": "Fehlerfall — nur Rauschen",
     "mode": "melody",
+    "source": "whistle",
     "seconds": 2,
     "expect": {
       "fails": true

@@ -19,8 +19,14 @@ export function clear(cv) {
   g.clearRect(0, 0, W, H)
 }
 
-/** Live-Vorschau während der Aufnahme: Tonhöhenlinie bzw. Pegelbalken. */
-export function drawLive(cv, live, mode) {
+/**
+ * Live-Vorschau während der Aufnahme: Tonhöhenlinie bzw. Pegelbalken.
+ *
+ * `view` spannt die Achse auf — beim Pfeifen 400 bis 4000 Hz, beim Gesang zwei
+ * Oktaven tiefer. Mit einer festen Skala für beides läge eine gesungene
+ * Melodie als flache Linie am unteren Rand.
+ */
+export function drawLive(cv, live, mode, view = { lo: 400, hi: 4000 }) {
   const { g, W, H } = fit(cv)
   g.clearRect(0, 0, W, H)
   if (!live.length) return
@@ -38,7 +44,7 @@ export function drawLive(cv, live, mode) {
         down = true
         return
       }
-      const y = H - ((Math.log2(hz / 400) / Math.log2(10)) * H * 0.84 + H * 0.08)
+      const y = H - ((Math.log2(hz / view.lo) / Math.log2(view.hi / view.lo)) * H * 0.84 + H * 0.08)
       if (down) {
         g.moveTo(x, y)
         down = false
